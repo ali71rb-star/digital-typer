@@ -177,8 +177,6 @@ function showAISettingsDialog(mainDlg)
     mainLayout.setOrientation(1)
     mainLayout.setPadding(30, 20, 30, 20)
     
-    -- (heading removed)
-    
     local keyLabel = TextView(service)
     keyLabel.setText("Gemini API Key:")
     keyLabel.setTextSize(14)
@@ -438,14 +436,25 @@ function clearAllDictionary()
   saveDictionary()
 end
 
+-- بہتر ڈکشنری تبدیلی: صرف مکمل الفاظ تبدیل کریں
 function applyDictionaryReplacements(text)
   if not text or text == "" then return text end
-  local result = text
-  for wrong, correct in pairs(changeTable) do
-    local pattern = escapePattern(wrong)
-    result = result:gsub(pattern, correct)
+  local words = {}
+  -- متن کو غیر لفظی اجزاء (spaces, punctuation) کے ساتھ توڑیں
+  for fragment, punct in text:gmatch("([^%s،۔؟!]+)([%s،۔؟!]*)") do
+    local replace = changeTable[fragment]  -- پورے لفظ کا بالکل مماثل چیک کریں
+    if replace then
+      table.insert(words, replace .. punct)
+    else
+      table.insert(words, fragment .. punct)
+    end
   end
-  return result
+  -- اگر آخر میں کوئی رموز باقی رہ جائیں تو جوڑ دیں
+  local lastPunct = text:match("[%s،۔؟!]+$")
+  if lastPunct and #words == 0 then
+    return text
+  end
+  return table.concat(words, "")
 end
 
 -- ============================================================
@@ -956,8 +965,9 @@ function startVoiceTyping(langCode)
         if isApiTypingEnabled() and getGeminiApiKey() ~= "" then
           processWithAI(rawText, function(aiText)
             if aiText then
+              -- AI سے سیکھیں مگر ڈکشنری نہ لگائیں
               learnFromAI(rawText, aiText)
-              local finalText = applyDictionaryReplacements(aiText)
+              local finalText = aiText
               finalText = applyEndPunctuation(finalText)
               service.insertText(service.getEditText(), finalText)
               service.speak(finalText)
@@ -1063,9 +1073,8 @@ function showBackupRestoreDialog()
 end
 
 -- ============================================================
--- Entry Point (شروع میں ڈکشنری صاف کریں)
+-- Entry Point
 -- ============================================================
-clearAllDictionary()  -- ڈکشنری کو مکمل صاف کر کے نئی شروعات کریں
 loadDictionary()
 loadAllSettings()
 if service.getEditText() then
