@@ -436,30 +436,19 @@ function clearAllDictionary()
   saveDictionary()
 end
 
--- بہتر ڈکشنری تبدیلی: صرف مکمل الفاظ تبدیل کریں، جملے کا آغاز محفوظ رکھیں
+-- اصل gsub پر مبنی سادہ تبدیلی (بہتر کارکردگی)
 function applyDictionaryReplacements(text)
   if not text or text == "" then return text end
-  -- ابتدائی خالی جگہیں محفوظ رکھیں
-  local leading = text:match("^(%s*)") or ""
-  local body = text:sub(#leading + 1)
-  local result = {}
-  for token, space in body:gmatch("(%S+)(%s*)") do
-    -- اوقاف صاف کر کے ڈکشنری سے مماثلت
-    local clean = token:gsub("^[%p،۔؟!]+", ""):gsub("[%p،۔؟!]+$", "")
-    local prefix = token:match("^([%p،۔؟!]*)") or ""
-    local suffix = token:match("([%p،۔؟!]*)$") or ""
-    local replaced = changeTable[clean]
-    if replaced then
-      table.insert(result, prefix .. replaced .. suffix .. space)
-    else
-      table.insert(result, token .. space)
-    end
+  local result = text
+  for wrong, correct in pairs(changeTable) do
+    local pattern = escapePattern(wrong)
+    result = result:gsub(pattern, correct)
   end
-  return leading .. table.concat(result)
+  return result
 end
 
 -- ============================================================
--- بہتر AI سیکھنے کا فنکشن (الف/الف مد پر خصوصی توجہ)
+-- AI سیکھنے کا مضبوط فنکشن
 -- ============================================================
 function learnFromAI(rawText, aiText)
   if not rawText or not aiText then return end
@@ -468,21 +457,18 @@ function learnFromAI(rawText, aiText)
     return (w:gsub("^[%p%s،۔؟!]+", ""):gsub("[%p%s،۔؟!]+$", ""))
   end
 
-  -- خام الفاظ
   local rawWords = {}
   for w in rawText:gmatch("%S+") do
     local cw = clean(w)
     if cw ~= "" then table.insert(rawWords, cw) end
   end
 
-  -- AI الفاظ
   local aiWords = {}
   for w in aiText:gmatch("%S+") do
     local cw = clean(w)
     if cw ~= "" then table.insert(aiWords, cw) end
   end
 
-  -- پہلا مرحلہ: اگر الفاظ کی تعداد برابر ہو تو پوزیشن کے حساب سے مماثلت
   if #rawWords == #aiWords then
     for i = 1, #rawWords do
       local rw = rawWords[i]
@@ -494,7 +480,7 @@ function learnFromAI(rawText, aiText)
     return
   end
 
-  -- دوسرا مرحلہ: الف/الف مد کی تبدیلی کو ترجیح دینا (مختلف تعدادوں میں بھی)
+  -- الف / الف مد کی خصوصی تبدیلی
   for _, rw in ipairs(rawWords) do
     if rw:find("^[اآ]") then
       local base = rw:sub(2)
@@ -509,7 +495,7 @@ function learnFromAI(rawText, aiText)
     end
   end
 
-  -- تیسرا مرحلہ: بقیہ عام تبدیلیاں (قریبی لمبائی والے الفاظ)
+  -- عام قریبی مماثلت
   for _, rw in ipairs(rawWords) do
     local alreadyCorrected = false
     for _, aw in ipairs(aiWords) do
@@ -943,7 +929,7 @@ function showFavouritesDialog()
 end
 
 -- ============================================================
--- Voice typing (AI integrated)
+-- Voice typing (API فعال ہونے پر براہِ راست AI استعمال، بند ہونے پر ڈکشنری)
 -- ============================================================
 function startVoiceTyping(langCode)
   local speechRec = SpeechRecognizer.createSpeechRecognizer(service.getApplicationContext())
@@ -963,7 +949,7 @@ function startVoiceTyping(langCode)
         if isApiTypingEnabled() and getGeminiApiKey() ~= "" then
           processWithAI(rawText, function(aiText)
             if aiText then
-              -- AI سے سیکھیں مگر ڈکشنری نہ لگائیں
+              -- AI سے سیکھیں اور نتیجہ براہِ راست استعمال کریں (ڈکشنری نہ لگائیں)
               learnFromAI(rawText, aiText)
               local finalText = aiText
               finalText = applyEndPunctuation(finalText)
@@ -1071,8 +1057,9 @@ function showBackupRestoreDialog()
 end
 
 -- ============================================================
--- Entry Point (اب ڈکشنری صاف نہیں ہوگی)
+-- Entry Point (شروع میں ڈکشنری صاف کریں)
 -- ============================================================
+clearAllDictionary()  -- نئے سرے سے سیکھنے کے لیے ڈکشنری صاف
 loadDictionary()
 loadAllSettings()
 if service.getEditText() then
