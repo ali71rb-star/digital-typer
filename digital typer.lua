@@ -34,7 +34,7 @@ local changeTable = {}
 -- سیٹنگز
 local settings = { punctuation = "newline", showLangDialog = true, autoCorrectUrdu = true }
 local favouriteIndices = {}
-local primaryLangCode = "en-PK"
+local primaryLangCode = "en-US"
 local secondaryLangCode = "ur-PK"
 
 -- ==================== GOOGLE GEMINI ONLY CONFIG ====================
@@ -177,6 +177,13 @@ function showAISettingsDialog(mainDlg)
     mainLayout.setOrientation(1)
     mainLayout.setPadding(30, 20, 30, 20)
     
+    local infoText = TextView(service)
+    infoText.setText("Get API key from: https://aistudio.google.com/app/apikey")
+    infoText.setTextSize(12)
+    infoText.setTextColor(0xFFAAAAAA)
+    infoText.setPadding(0, 0, 0, 20)
+    mainLayout.addView(infoText)
+    
     local keyLabel = TextView(service)
     keyLabel.setText("Gemini API Key:")
     keyLabel.setTextSize(14)
@@ -295,11 +302,6 @@ function showAISettingsDialog(mainDlg)
         local newModel = GEMINI_MODELS[modelSpinner.getSelectedItemPosition() + 1]
         if newKey and newKey ~= "" then saveGeminiApiKey(newKey) end
         if newModel then saveGeminiModel(newModel) end
-        -- ★ API key محفوظ کرتے ہی API Typing خودبخود آن کر دیں
-        setApiTypingEnabled(true)
-        if mainLayout then
-            -- موجودہ لےآؤٹ میں API بٹن کو اپ ڈیٹ کرنا ممکن نہیں، لیکن نئی سیٹنگ محفوظ ہو چکی
-        end
         service.speak("Settings saved")
         dlg.dismiss()
         if mainDlg then mainDlg.show() end
@@ -317,15 +319,71 @@ function showAISettingsDialog(mainDlg)
 end
 
 -- ============================================================
--- زبانیں (صرف چار منتخب زبانیں)
+-- زبانیں
 -- ============================================================
 local allLanguages = {
+  {name = "English (United States)", code = "en-US"},
+  {name = "English (United Kingdom)", code = "en-GB"},
+  {name = "English (India)", code = "en-IN"},
   {name = "English (Pakistan)", code = "en-PK"},
+  {name = "Urdu", code = "ur-PK"},
   {name = "Hindi (India)", code = "hi-IN"},
-  {name = "Urdu (Pakistan)", code = "ur-PK"},
+  {name = "Punjabi (India)", code = "pa-IN"},
+  {name = "Tamil (India)", code = "ta-IN"},
+  {name = "Tamil (Sri Lanka)", code = "ta-LK"},
+  {name = "Tamil (Singapore)", code = "ta-SG"},
+  {name = "Tamil (Malaysia)", code = "ta-MY"},
+  {name = "Bengali (Bangladesh)", code = "bn-BD"},
+  {name = "Bengali (India)", code = "bn-IN"},
+  {name = "Kannada (India)", code = "kn-IN"},
+  {name = "Marathi (India)", code = "mr-IN"},
+  {name = "Gujarati (India)", code = "gu-IN"},
+  {name = "Sinhala (Sri Lanka)", code = "si-LK"},
+  {name = "Telugu (India)", code = "te-IN"},
+  {name = "Malayalam (India)", code = "ml-IN"},
+  {name = "Nepali (Nepal)", code = "ne-NP"},
+  {name = "Lao (Laos)", code = "lo-LA"},
+  {name = "Thai (Thailand)", code = "th-TH"},
+  {name = "Burmese (Myanmar)", code = "my-MM"},
+  {name = "Khmer (Cambodia)", code = "km-KH"},
+  {name = "Mandarin Chinese (Mainland China)", code = "zh-CN"},
+  {name = "Mandarin Chinese (Taiwan)", code = "zh-TW"},
+  {name = "Mandarin Chinese (Hong Kong)", code = "zh-HK"},
+  {name = "Cantonese (Hong Kong)", code = "yue-Hant-HK"},
+  {name = "Korean (South Korea)", code = "ko-KR"},
+  {name = "Japanese (Japan)", code = "ja-JP"},
+  {name = "Indonesian (Indonesia)", code = "id-ID"},
+  {name = "Malay (Malaysia)", code = "ms-MY"},
+  {name = "Javanese (Indonesia)", code = "jv-ID"},
+  {name = "Sundanese (Indonesia)", code = "su-ID"},
+  {name = "Filipino (Philippines)", code = "fil-PH"},
+  {name = "Vietnamese (Vietnam)", code = "vi-VN"},
+  {name = "Turkish (Turkey)", code = "tr-TR"},
+  {name = "Azerbaijani (Azerbaijan)", code = "az-AZ"},
+  {name = "Kazakh (Kazakhstan)", code = "kk-KZ"},
+  {name = "Mongolian (Mongolia)", code = "mn-MN"},
+  {name = "Georgian (Georgia)", code = "ka-GE"},
+  {name = "Armenian (Armenia)", code = "hy-AM"},
+  {name = "Uzbek (Uzbekistan)", code = "uz-UZ"},
+  {name = "Hebrew (Israel)", code = "iw-IL"},
+  {name = "Arabic (Israel)", code = "ar-IL"},
+  {name = "Arabic (Jordan)", code = "ar-JO"},
+  {name = "Arabic (UAE)", code = "ar-AE"},
+  {name = "Arabic (Bahrain)", code = "ar-BH"},
+  {name = "Arabic (Algeria)", code = "ar-DZ"},
   {name = "Arabic (Saudi Arabia)", code = "ar-SA"},
+  {name = "Arabic (Kuwait)", code = "ar-KW"},
+  {name = "Arabic (Morocco)", code = "ar-MA"},
+  {name = "Arabic (Tunisia)", code = "ar-TN"},
+  {name = "Arabic (Oman)", code = "ar-OM"},
+  {name = "Arabic (Palestine)", code = "ar-PS"},
+  {name = "Arabic (Egypt)", code = "ar-EG"},
+  {name = "Arabic (Qatar)", code = "ar-QA"},
+  {name = "Arabic (Lebanon)", code = "ar-LB"},
+  {name = "Persian (Iran)", code = "fa-IR"},
 }
 
+table.sort(allLanguages, function(a,b) return a.name < b.name end)
 local languageItems = {}
 local languageCodes = {}
 for i, lang in ipairs(allLanguages) do
@@ -441,7 +499,6 @@ function clearAllDictionary()
   saveDictionary()
 end
 
--- ڈکشنری تبدیلی (پورے الفاظ پر مماثلت)
 function applyDictionaryReplacements(text)
   if not text or text == "" then return text end
   local result = text
@@ -453,12 +510,14 @@ function applyDictionaryReplacements(text)
 end
 
 -- ============================================================
--- AI سیکھنے کا فنکشن (الف/الف مد اور عام تبدیلیاں)
+-- AI سے سیکھ کر ڈکشنری میں الفاظ شامل کرنے کا بہتر طریقہ
 -- ============================================================
 function learnFromAI(rawText, aiText)
   if not rawText or not aiText then return end
 
+  -- الفاظ کو صاف کرنے کا مددگار فنکشن
   local function clean(w)
+    -- شروع اور آخر سے رموز، خالی جگہیں، اور عام اردو نشانات ہٹائیں
     return (w:gsub("^[%p%s،۔؟!]+", ""):gsub("[%p%s،۔؟!]+$", ""))
   end
 
@@ -474,7 +533,7 @@ function learnFromAI(rawText, aiText)
     if cw ~= "" then table.insert(aiWords, cw) end
   end
 
-  -- اگر تعداد برابر ہو تو پوزیشن کے حساب سے مماثلت
+  -- اگر الفاظ کی تعداد برابر ہو تو ایک ایک کرکے موازنہ کریں
   if #rawWords == #aiWords then
     for i = 1, #rawWords do
       local rw = rawWords[i]
@@ -483,35 +542,36 @@ function learnFromAI(rawText, aiText)
         addToDictionary(rw, aw)
       end
     end
-    return
-  end
-
-  -- الف/الف مد کی خصوصی تبدیلی
-  for _, rw in ipairs(rawWords) do
-    if rw:find("^[اآ]") then
-      local base = rw:sub(2)
-      local altStart = (rw:find("^ا") and "آ") or "ا"
-      local altWord = altStart .. base
+  else
+    -- اگر تعداد برابر نہ ہو تو ہر خام لفظ کے لیے AI الفاظ میں اس کا مماثل ڈھونڈیں
+    for _, rw in ipairs(rawWords) do
+      local found = false
+      -- پہلے بالکل مماثل لفظ ڈھونڈیں
       for _, aw in ipairs(aiWords) do
-        if aw == altWord then
-          addToDictionary(rw, altWord)
-          break
-        end
+        if rw == aw then found = true break end
       end
-    end
-  end
-
-  -- عام قریبی مماثلت
-  for _, rw in ipairs(rawWords) do
-    local alreadyCorrected = false
-    for _, aw in ipairs(aiWords) do
-      if rw == aw then alreadyCorrected = true break end
-    end
-    if not alreadyCorrected then
-      for _, aw in ipairs(aiWords) do
-        if aw ~= rw and math.abs(#aw - #rw) <= 2 then
-          addToDictionary(rw, aw)
-          break
+      -- اگر نہ ملے تو وہ لفظ تبدیل ہوا ہے، قریب ترین ڈھونڈیں
+      if not found then
+        -- خاص طور پر الف / الف مد کی صورت
+        if rw:find("^[اآ]") then
+          local base = rw:sub(2)
+          local altStart = (rw:find("^ا") and "آ") or "ا"
+          local altWord = altStart .. base
+          for _, aw in ipairs(aiWords) do
+            if aw == altWord then
+              addToDictionary(rw, altWord)
+              break
+            end
+          end
+        else
+          -- عمومی تبدیلی: اگر AI نے کوئی مختلف لفظ دیا اور خام لفظ AI الفاظ میں سے کسی سے بھی میل نہیں کھاتا،
+          -- تو پہلا ایسا AI لفظ استعمال کریں جس کی لمبائی قریب ہو (احتیاط کے ساتھ)
+          for _, aw in ipairs(aiWords) do
+            if aw ~= rw and #aw >= #rw - 1 and #aw <= #rw + 2 then
+              addToDictionary(rw, aw)
+              break
+            end
+          end
         end
       end
     end
@@ -660,12 +720,12 @@ function loadAllSettings()
       if func then
         local data = func()
         if type(data) == "table" then
-          primaryLangCode = data.primary or "en-PK"
+          primaryLangCode = data.primary or "en-US"
           secondaryLangCode = data.secondary or "ur-PK"
           favouriteIndices = data.favourites or {}
           settings.punctuation = data.punctuation or "newline"
           settings.showLangDialog = (data.showLangDialog == nil) and true or data.showLangDialog
-          settings.autoCorrectUrdu = true
+          settings.autoCorrectUrdu = true  -- ہمیشہ فعال، لیکن اب استعمال نہیں ہوگا
           return true
         end
       end
@@ -706,6 +766,7 @@ function applyEndPunctuation(text)
   return text
 end
 
+-- پنکچویشن سیٹنگز ڈائیلاگ (آٹو کریکٹ کے بغیر)
 function showPunctuationSettingsDialog()
   local dlg = LuaDialog(service)
   dlg.setTitle("Punctuation Settings")
@@ -899,15 +960,42 @@ function showLanguagePicker(callback, title)
   dlg.setTitle(title or "Select Language")
   local layout = {
     LinearLayout; orientation = "vertical"; padding = "10dp";
-    { ListView; id = "langList"; layout_width = "fill"; layout_height = "wrap_content"; };
+    { EditText; id = "searchBox"; hint = "Search language..."; textSize = "14sp"; layout_width = "fill"; layout_marginBottom = "10dp"; };
+    { ListView; id = "langList"; layout_width = "fill"; layout_height = "350dp"; };
   }
   local view = loadlayout(layout)
-  langList.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, languageItems))
+  local fullAdapter = ArrayAdapter(service, android.R.layout.simple_list_item_1, languageItems)
+  langList.setAdapter(fullAdapter)
+  searchBox.addTextChangedListener({
+    onTextChanged = function(s)
+      local query = tostring(s):lower()
+      local filtered = {}
+      for i, item in ipairs(languageItems) do if item:lower():find(query) then table.insert(filtered, item) end end
+      langList.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, filtered))
+    end
+  })
   langList.onItemClick = function(l, v, p, i)
-    local selectedItem = languageItems[p+1]
-    callback(languageCodes[p+1], selectedItem)
-    dlg.dismiss()
+    local selectedItem = langList.getAdapter().getItem(p)
+    for idx, item in ipairs(languageItems) do
+      if item == selectedItem then callback(languageCodes[idx], selectedItem) dlg.dismiss() break end
+    end
   end
+  langList.setOnItemLongClickListener(function(parent, v, position, id)
+    local selectedItem = langList.getAdapter().getItem(position)
+    for idx, item in ipairs(languageItems) do
+      if item == selectedItem then
+        local already = false
+        for _, fidx in ipairs(favouriteIndices) do if fidx == idx then already = true break end end
+        if not already then
+          table.insert(favouriteIndices, idx)
+          saveAllSettings()
+          service.speak("Added to favourites")
+        end
+        return true
+      end
+    end
+    return false
+  end)
   dlg.setView(view)
   dlg.show()
 end
@@ -920,7 +1008,7 @@ function showFavouritesDialog()
   dlg.setTitle("★ Favourite Languages ★")
   local layout = {
     LinearLayout; orientation = "vertical"; padding = "10dp";
-    { ListView; id = "favList"; layout_width = "fill"; layout_height = "wrap_content"; };
+    { ListView; id = "favList"; layout_width = "fill"; layout_height = "400dp"; };
     { Button; text = "Clear All"; layout_width = "fill"; onClick = function() favouriteIndices = {} saveAllSettings() dlg.dismiss() end; };
   }
   favList.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, favItems))
@@ -935,7 +1023,7 @@ function showFavouritesDialog()
 end
 
 -- ============================================================
--- Voice typing (API فعال ہونے پر براہِ راست AI استعمال، بند ہونے پر ڈکشنری)
+-- Voice typing (AI integrated)
 -- ============================================================
 function startVoiceTyping(langCode)
   local speechRec = SpeechRecognizer.createSpeechRecognizer(service.getApplicationContext())
@@ -955,8 +1043,9 @@ function startVoiceTyping(langCode)
         if isApiTypingEnabled() and getGeminiApiKey() ~= "" then
           processWithAI(rawText, function(aiText)
             if aiText then
+              -- AI سے سیکھ کر ڈکشنری میں درستگیاں شامل کریں
               learnFromAI(rawText, aiText)
-              local finalText = aiText
+              local finalText = applyDictionaryReplacements(aiText)
               finalText = applyEndPunctuation(finalText)
               service.insertText(service.getEditText(), finalText)
               service.speak(finalText)
