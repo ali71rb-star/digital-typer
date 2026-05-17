@@ -436,25 +436,26 @@ function clearAllDictionary()
   saveDictionary()
 end
 
--- بہتر ڈکشنری تبدیلی: صرف مکمل الفاظ تبدیل کریں
+-- بہتر ڈکشنری تبدیلی: صرف مکمل الفاظ تبدیل کریں، جملے کا آغاز محفوظ رکھیں
 function applyDictionaryReplacements(text)
   if not text or text == "" then return text end
-  local words = {}
-  -- متن کو غیر لفظی اجزاء (spaces, punctuation) کے ساتھ توڑیں
-  for fragment, punct in text:gmatch("([^%s،۔؟!]+)([%s،۔؟!]*)") do
-    local replace = changeTable[fragment]  -- پورے لفظ کا بالکل مماثل چیک کریں
-    if replace then
-      table.insert(words, replace .. punct)
+  -- ابتدائی خالی جگہیں محفوظ رکھیں
+  local leading = text:match("^(%s*)") or ""
+  local body = text:sub(#leading + 1)
+  local result = {}
+  for token, space in body:gmatch("(%S+)(%s*)") do
+    -- اوقاف صاف کر کے ڈکشنری سے مماثلت
+    local clean = token:gsub("^[%p،۔؟!]+", ""):gsub("[%p،۔؟!]+$", "")
+    local prefix = token:match("^([%p،۔؟!]*)") or ""
+    local suffix = token:match("([%p،۔؟!]*)$") or ""
+    local replaced = changeTable[clean]
+    if replaced then
+      table.insert(result, prefix .. replaced .. suffix .. space)
     else
-      table.insert(words, fragment .. punct)
+      table.insert(result, token .. space)
     end
   end
-  -- اگر آخر میں کوئی رموز باقی رہ جائیں تو جوڑ دیں
-  local lastPunct = text:match("[%s،۔؟!]+$")
-  if lastPunct and #words == 0 then
-    return text
-  end
-  return table.concat(words, "")
+  return leading .. table.concat(result)
 end
 
 -- ============================================================
@@ -495,12 +496,10 @@ function learnFromAI(rawText, aiText)
 
   -- دوسرا مرحلہ: الف/الف مد کی تبدیلی کو ترجیح دینا (مختلف تعدادوں میں بھی)
   for _, rw in ipairs(rawWords) do
-    -- صرف وہ الفاظ جو الف یا الف مد سے شروع ہوں
     if rw:find("^[اآ]") then
       local base = rw:sub(2)
       local altStart = (rw:find("^ا") and "آ") or "ا"
       local altWord = altStart .. base
-      -- AI الفاظ میں یہ تبدیل شدہ لفظ تلاش کریں
       for _, aw in ipairs(aiWords) do
         if aw == altWord then
           addToDictionary(rw, altWord)
@@ -517,7 +516,6 @@ function learnFromAI(rawText, aiText)
       if rw == aw then alreadyCorrected = true break end
     end
     if not alreadyCorrected then
-      -- سب سے مشابہ AI لفظ ڈھونڈیں (لمبائی میں فرق 2 سے کم ہو)
       for _, aw in ipairs(aiWords) do
         if aw ~= rw and math.abs(#aw - #rw) <= 2 then
           addToDictionary(rw, aw)
@@ -1073,7 +1071,7 @@ function showBackupRestoreDialog()
 end
 
 -- ============================================================
--- Entry Point
+-- Entry Point (اب ڈکشنری صاف نہیں ہوگی)
 -- ============================================================
 loadDictionary()
 loadAllSettings()
