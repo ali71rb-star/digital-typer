@@ -37,10 +37,10 @@ local favouriteIndices = {}
 local primaryLangCode = "en-PK"
 local secondaryLangCode = "ur-PK"
 
--- ==================== GOOGLE GEMINI ONLY CONFIG ====================
-local AI_PREFS = "UniqueTyperAI"
-local aiPrefs = service.getSharedPreferences(AI_PREFS, Context.MODE_PRIVATE)
-local aiEditor = aiPrefs.edit()
+-- ==================== GOOGLE GEMINI CONFIG ====================
+local GEMINI_PREFS = "UniqueTyperAI"
+local geminiPrefs = service.getSharedPreferences(GEMINI_PREFS, Context.MODE_PRIVATE)
+local geminiEditor = geminiPrefs.edit()
 
 local GEMINI_MODELS = {
     "Gemini 2.5 Flash",
@@ -55,200 +55,321 @@ local geminiApiDetails = {
 }
 
 function getGeminiApiKey()
-    return aiPrefs.getString("gemini_apiKey", "")
+    return geminiPrefs.getString("gemini_apiKey", "")
 end
 
 function saveGeminiApiKey(key)
-    aiEditor.putString("gemini_apiKey", key)
-    aiEditor.commit()
+    geminiEditor.putString("gemini_apiKey", key)
+    geminiEditor.commit()
 end
 
 function getGeminiModel()
-    return aiPrefs.getString("gemini_model", "Gemini 2.5 Flash")
+    return geminiPrefs.getString("gemini_model", "Gemini 2.5 Flash")
 end
 
 function saveGeminiModel(model)
-    aiEditor.putString("gemini_model", model)
-    aiEditor.commit()
+    geminiEditor.putString("gemini_model", model)
+    geminiEditor.commit()
+end
+
+-- ==================== GROQ AI CONFIG ====================
+local GROQ_PREFS = "GroqAITyper"
+local groqPrefs = service.getSharedPreferences(GROQ_PREFS, Context.MODE_PRIVATE)
+local groqEditor = groqPrefs.edit()
+
+local GROQ_MODELS = {
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "mixtral-8x7b-32768",
+    "gemma2-9b-it",
+    "llama-guard-3-8b"
+}
+
+function getGroqApiKey()
+    return groqPrefs.getString("groq_apiKey", "")
+end
+
+function saveGroqApiKey(key)
+    groqEditor.putString("groq_apiKey", key)
+    groqEditor.commit()
+end
+
+function getGroqModel()
+    return groqPrefs.getString("groq_model", "llama-3.3-70b-versatile")
+end
+
+function saveGroqModel(model)
+    groqEditor.putString("groq_model", model)
+    groqEditor.commit()
+end
+
+-- ==================== SHARED AI SETTINGS ====================
+local SHARED_PREFS = "AI_Shared"
+local sharedPrefs = service.getSharedPreferences(SHARED_PREFS, Context.MODE_PRIVATE)
+local sharedEditor = sharedPrefs.edit()
+
+function getSelectedAIEngine()
+    return sharedPrefs.getString("ai_engine", "gemini")
+end
+
+function saveSelectedAIEngine(engine)
+    sharedEditor.putString("ai_engine", engine)
+    sharedEditor.commit()
+end
+
+-- ★ Custom Instruction ★
+function getCustomInstruction()
+    return sharedPrefs.getString("custom_instruction", "")
+end
+
+function saveCustomInstruction(instruction)
+    sharedEditor.putString("custom_instruction", instruction)
+    sharedEditor.commit()
 end
 
 function isEmojiEnabled()
-    return aiPrefs.getBoolean("emojiEnabled", false)
+    return sharedPrefs.getBoolean("emojiEnabled", false)
 end
 
 function setEmojiEnabled(enabled)
-    aiEditor.putBoolean("emojiEnabled", enabled)
-    aiEditor.commit()
+    sharedEditor.putBoolean("emojiEnabled", enabled)
+    sharedEditor.commit()
 end
 
 function isApiTypingEnabled()
-    return aiPrefs.getBoolean("apiTypingEnabled", true)
+    return sharedPrefs.getBoolean("apiTypingEnabled", true)
 end
 
 function setApiTypingEnabled(enabled)
-    aiEditor.putBoolean("apiTypingEnabled", enabled)
-    aiEditor.commit()
+    sharedEditor.putBoolean("apiTypingEnabled", enabled)
+    sharedEditor.commit()
 end
 
+-- ==================== STRICT AI INSTRUCTION (NO EXTRA TEXT) ====================
+local DEFAULT_INSTRUCTION = [[You are a professional text grammar and spelling correction tool. Correct the given raw spoken text strictly according to these rules:
+1. Keep English words written in English script (e.g., if the text has words like "message", "thank you", "call", "audio", keep them in English alphabet/characters, DO NOT convert or transliterate them into Urdu script like "میسج").
+2. Keep Urdu words strictly in Urdu script. Fix any spelling issues or bad word joints in Urdu.
+3. Ensure proper spacing between words.
+4. Do NOT add any introductory text, explanation, notes, extra pleasantries, greetings, apologies, or any additional words or sentences.
+5. Do NOT add any emojis unless the user explicitly requested them.
+6. Return ONLY the exact corrected sentence text output. No extra words before or after the corrected sentence. Do not add "Corrected text:" or any similar prefix. Just the corrected sentence.]]
+
+-- ==================== API CALLS ====================
 function testGeminiAPI(apiKey, model, callback)
     local url = "https://generativelanguage.googleapis.com/v1beta/models?key=" .. apiKey
     Http.get(url, {}, function(status, data)
-        if status == 200 then
-            callback(true, "API key is valid!")
-        else
-            callback(false, "Invalid API key or error: " .. status)
-        end
+        if status == 200 then callback(true, "API key is valid!")
+        else callback(false, "Invalid API key or error: " .. status) end
     end)
 end
 
 function callGeminiAPI(apiKey, model, prompt, callback)
     local modelInfo = geminiApiDetails[model]
-    if not modelInfo then
-        callback(nil, "Error: Model not found")
-        return
-    end
-    local url = "https://generativelanguage.googleapis.com/" .. modelInfo.version .. "/" .. modelInfo.id .. ":generateContent?key=" .. apiKey
-    local payload = { 
-        contents = {{
-            parts = {{ text = prompt }}
-        }}
+    if not modelInfo then callback(nil, "Error: Model not found") return end
+    
+    local cleanKey = apiKey:gsub("%s+", "")
+    local url = "https://generativelanguage.googleapis.com/" .. modelInfo.version .. "/" .. modelInfo.id .. ":generateContent?key=" .. cleanKey
+    
+    local systemInstruction = getCustomInstruction()
+    if systemInstruction == "" then systemInstruction = DEFAULT_INSTRUCTION end
+    
+    local payload = {
+        contents = {
+            {
+                parts = {
+                    { text = prompt }
+                }
+            }
+        },
+        systemInstruction = {
+            parts = {
+                { text = systemInstruction }
+            }
+        }
     }
+    
     local headers = { ["Content-Type"] = "application/json" }
     Http.post(url, cjson.encode(payload), headers, function(status, data)
         if status == 200 then
             local ok, decoded = pcall(cjson.decode, data)
             if ok and decoded and decoded.candidates and decoded.candidates[1] then
-                local text = decoded.candidates[1].content and 
-                             decoded.candidates[1].content.parts and 
-                             decoded.candidates[1].content.parts[1] and 
-                             decoded.candidates[1].content.parts[1].text
-                if text then
-                    callback(text, nil)
-                else
-                    callback(nil, "Invalid response from Gemini")
-                end
-            else
-                callback(nil, "Failed to parse Gemini response")
-            end
-        else
-            callback(nil, "Gemini Error: " .. status)
+                local text = decoded.candidates[1].content and decoded.candidates[1].content.parts and decoded.candidates[1].content.parts[1] and decoded.candidates[1].content.parts[1].text
+                if text then callback(text, nil) else callback(nil, "Invalid response from Gemini") end
+            else callback(nil, "Failed to parse Gemini response") end
+        else 
+            callback(nil, "Gemini Error: " .. status .. "\nPlease verify that your Gemini API Key is correct.") 
         end
     end)
 end
 
-function processWithAI(spokenText, callback)
-    local apiKey = getGeminiApiKey()
-    if not apiKey or apiKey == "" then
-        callback(spokenText)
-        return
-    end
-    local model = getGeminiModel()
-    local emojiEnabled = isEmojiEnabled()
-    local prompt
-    if emojiEnabled then
-        prompt = [[Process the following voice transcription:
-1. Fix all spelling mistakes (Urdu and English both).
-2. Add proper punctuation (. , ? !).
-3. Keep natural language flow.
-4. IMPORTANT: After each sentence, add ONE relevant emoji based on the sentence's sentiment.
-5. Preserve language scripts strictly: English words must remain in Latin script, Urdu words in Urdu script. Do NOT transliterate.
-6. Return only the final corrected text with emojis.
-
-Raw text: ]] .. spokenText
-    else
-        prompt = [[Process the following voice transcription:
-1. Fix all spelling mistakes (Urdu and English both).
-2. Add proper punctuation (. , ? !).
-3. Keep natural language flow.
-4. Do NOT add any emojis.
-5. Preserve language scripts strictly: English words must remain in Latin script, Urdu words in Urdu script. Do NOT transliterate.
-6. Return only the corrected text.
-
-Raw text: ]] .. spokenText
-    end
-    callGeminiAPI(apiKey, model, prompt, callback)
+function testGroqAPI(apiKey, model, callback)
+    local url = "https://api.groq.com/openai/v1/models"
+    local headers = { ["Authorization"] = "Bearer " .. apiKey }
+    Http.get(url, headers, function(status, data)
+        if status == 200 then callback(true, "API key is valid!")
+        elseif status == 401 then callback(false, "Invalid API key")
+        else callback(false, "Error: " .. status) end
+    end)
 end
 
+function callGroqAPI(apiKey, model, systemPrompt, userPrompt, callback)
+    local url = "https://api.groq.com/openai/v1/chat/completions"
+    local headers = { ["Content-Type"] = "application/json", ["Authorization"] = "Bearer " .. apiKey }
+    local messages = {}
+    if systemPrompt ~= "" then table.insert(messages, {role = "system", content = systemPrompt}) end
+    table.insert(messages, {role = "user", content = userPrompt})
+    local payload = { model = model, messages = messages, max_tokens = 1024, temperature = 0.7 }
+    Http.post(url, cjson.encode(payload), headers, function(status, data)
+        if status == 200 then
+            local ok, decoded = pcall(cjson.decode, data)
+            if ok and decoded and decoded.choices and decoded.choices[1] then
+                local text = decoded.choices[1].message.content
+                if text then callback(text, nil) else callback(nil, "Invalid response from Groq") end
+            else callback(nil, "Failed to parse Groq response") end
+        elseif status == 401 then callback(nil, "Invalid API key. Please check your Groq API key")
+        elseif status == 429 then callback(nil, "Rate limit exceeded. Please wait or check your quota")
+        else callback(nil, "Groq Error: " .. status) end
+    end)
+end
+
+-- ==================== PROMPTS ====================
+function getGeminiPrompt(spokenText)
+    local extra = isEmojiEnabled() and " After each sentence, add ONE relevant emoji." or " Do NOT add any emojis."
+    return "Fix this spoken text keeping script languages intact (English words in English characters, Urdu in Urdu characters):" .. extra .. "\n\nInput Text: " .. spokenText
+end
+
+function cleanAIResponse(text)
+    if not text then return "" end
+    -- Remove common prefixes
+    text = text:gsub("^[%s]*Corrected:?%s*", "")
+    text = text:gsub("^[%s]*Output:?%s*", "")
+    text = text:gsub("^[%s]*Here is the corrected text:?%s*", "")
+    text = text:gsub("%s*$", "")
+    -- Remove any extra sentence that might start with "I have corrected" etc. (simple heuristic)
+    if text:find("^[A-Z][a-z]+%s+") then
+        -- if it starts with a word like "I", "Here", "Please" then keep only first sentence?
+        local firstSentence = text:match("^[^.]+[.]?")
+        if firstSentence then text = firstSentence end
+    end
+    return text
+end
+
+function showErrorPopup(message)
+    local dlg = LuaDialog(service)
+    dlg.setTitle("API Error")
+    dlg.setMessage(message)
+    dlg.setButton("Cancel", function() dlg.dismiss() end)
+    dlg.show()
+end
+
+-- ==================== AI PROCESSING ====================
+function processWithAI(spokenText, callback)
+    local engine = getSelectedAIEngine()
+    if engine == "groq" then
+        local apiKey = getGroqApiKey()
+        if not apiKey or apiKey == "" then
+            service.speak("Please set Groq API key in AI settings first")
+            callback(spokenText)
+            return
+        end
+        local model = getGroqModel()
+        local systemPrompt = getCustomInstruction()
+        if systemPrompt == "" then systemPrompt = DEFAULT_INSTRUCTION end
+        callGroqAPI(apiKey, model, systemPrompt, spokenText, function(result, error)
+            if error then showErrorPopup(error)
+            else callback(cleanAIResponse(result)) end
+        end)
+    else
+        local apiKey = getGeminiApiKey()
+        if not apiKey or apiKey == "" then
+            callback(spokenText)
+            return
+        end
+        local model = getGeminiModel()
+        local prompt = getGeminiPrompt(spokenText)
+        callGeminiAPI(apiKey, model, prompt, function(result, error)
+            if error then showErrorPopup(error)
+            else callback(cleanAIResponse(result)) end
+        end)
+    end
+end
+
+-- ==================== AI SETTINGS DIALOG ====================
 function showAISettingsDialog(mainDlg)
     local dlg = LuaDialog(service)
     dlg.setTitle("AI Engine Settings")
     dlg.setCancelable(true)
+    
     local mainLayout = LinearLayout(service)
     mainLayout.setOrientation(1)
     mainLayout.setPadding(30, 20, 30, 20)
     
-    local keyLabel = TextView(service)
-    keyLabel.setText("Gemini API Key:")
-    keyLabel.setTextSize(14)
-    keyLabel.setTextColor(0xFFFFFFFF)
-    keyLabel.setPadding(0, 0, 0, 10)
-    mainLayout.addView(keyLabel)
+    local engineLabel = TextView(service)
+    engineLabel.setText("Select AI Engine:")
+    engineLabel.setTextSize(14)
+    engineLabel.setTextColor(0xFFFFFFFF)
+    engineLabel.setPadding(0, 0, 0, 10)
+    mainLayout.addView(engineLabel)
     
-    local keyInput = EditText(service)
-    keyInput.setHint("Enter Gemini API Key")
-    local savedKey = getGeminiApiKey()
-    if savedKey and savedKey ~= "" then keyInput.setText(savedKey) end
-    keyInput.setTextSize(14)
-    keyInput.setPadding(20, 15, 20, 15)
-    keyInput.setBackgroundColor(0xFF222222)
-    local keyParams = LinearLayout.LayoutParams(-1, -2)
-    keyParams.setMargins(0, 0, 0, 15)
-    keyInput.setLayoutParams(keyParams)
-    mainLayout.addView(keyInput)
+    local engineSpinner = Spinner(service)
+    local engines = {"Gemini", "Groq"}
+    local engineAdapter = ArrayAdapter(service, android.R.layout.simple_spinner_item, engines)
+    engineAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+    engineSpinner.setAdapter(engineAdapter)
+    local currentEngine = getSelectedAIEngine()
+    engineSpinner.setSelection(currentEngine == "groq" and 1 or 0)
+    mainLayout.addView(engineSpinner)
     
-    local modelLabel = TextView(service)
-    modelLabel.setText("Select Model:")
-    modelLabel.setTextSize(14)
-    modelLabel.setTextColor(0xFFFFFFFF)
-    modelLabel.setPadding(0, 0, 0, 10)
-    mainLayout.addView(modelLabel)
+    local settingsContainer = LinearLayout(service)
+    settingsContainer.setOrientation(1)
+    settingsContainer.setPadding(0, 20, 0, 0)
+    mainLayout.addView(settingsContainer)
     
-    local modelSpinner = Spinner(service)
-    local adapter = ArrayAdapter(service, android.R.layout.simple_spinner_item, GEMINI_MODELS)
-    adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-    modelSpinner.setAdapter(adapter)
-    local currentModel = getGeminiModel()
-    for i = 1, #GEMINI_MODELS do
-        if GEMINI_MODELS[i] == currentModel then modelSpinner.setSelection(i - 1) break end
-    end
-    local spinnerParams = LinearLayout.LayoutParams(-1, -2)
-    spinnerParams.setMargins(0, 0, 0, 15)
-    modelSpinner.setLayoutParams(spinnerParams)
-    mainLayout.addView(modelSpinner)
-
-    -- Typing with API Toggle Button
     local apiBtn = Button(service)
     local apiState = isApiTypingEnabled()
     apiBtn.setText(apiState and "Typing with API: ON" or "Typing with API: OFF")
     apiBtn.setTextSize(14)
     apiBtn.setBackgroundColor(0xFF333333)
     apiBtn.setPadding(0, 15, 0, 15)
-    apiBtn.setLayoutParams(LinearLayout.LayoutParams(-1, -2))
-    local apiBtnParams = apiBtn.getLayoutParams()
-    apiBtnParams.setMargins(0, 0, 0, 15)
-    apiBtn.setLayoutParams(apiBtnParams)
     apiBtn.setOnClickListener(function()
         local newState = not isApiTypingEnabled()
         setApiTypingEnabled(newState)
+        saveAllSettings()
         apiBtn.setText(newState and "Typing with API: ON" or "Typing with API: OFF")
         service.speak("API Typing " .. (newState and "enabled" or "disabled"))
     end)
     mainLayout.addView(apiBtn)
     
+    local instrLabel = TextView(service)
+    instrLabel.setText("Custom Instruction:")
+    instrLabel.setTextSize(14)
+    instrLabel.setTextColor(0xFFFFFFFF)
+    instrLabel.setPadding(0, 0, 0, 10)
+    mainLayout.addView(instrLabel)
+    
+    local instructionInput = EditText(service)
+    instructionInput.setHint("Enter custom instruction for AI (leave empty for default)")
+    instructionInput.setText(getCustomInstruction())
+    instructionInput.setTextSize(14)
+    instructionInput.setMinLines(3)
+    instructionInput.setPadding(20, 15, 20, 15)
+    instructionInput.setBackgroundColor(0xFF222222)
+    local instrParams = LinearLayout.LayoutParams(-1, -2)
+    instrParams.setMargins(0, 0, 0, 15)
+    instructionInput.setLayoutParams(instrParams)
+    mainLayout.addView(instructionInput)
+    
     local buttonRow = LinearLayout(service)
     buttonRow.setOrientation(0)
-    buttonRow.setPadding(0, 0, 0, 0)
+    buttonRow.setPadding(0, 20, 0, 0)
     
-    -- صرف SAVE اور GO BACK بٹن
     local saveBtn = Button(service)
     saveBtn.setText("SAVE")
     saveBtn.setTextSize(12)
     saveBtn.setBackgroundColor(0xFF4CAF50)
     saveBtn.setPadding(0, 15, 0, 15)
     saveBtn.setLayoutParams(LinearLayout.LayoutParams(0, -2, 1))
-    local saveParams = saveBtn.getLayoutParams()
-    saveParams.setMargins(5, 0, 5, 0)
-    saveBtn.setLayoutParams(saveParams)
+    saveBtn.getLayoutParams().setMargins(5, 0, 5, 0)
     
     local backBtn = Button(service)
     backBtn.setText("GO BACK")
@@ -256,24 +377,130 @@ function showAISettingsDialog(mainDlg)
     backBtn.setBackgroundColor(0xFFF44336)
     backBtn.setPadding(0, 15, 0, 15)
     backBtn.setLayoutParams(LinearLayout.LayoutParams(0, -2, 1))
-    local backParams = backBtn.getLayoutParams()
-    backParams.setMargins(5, 0, 0, 0)
-    backBtn.setLayoutParams(backParams)
+    backBtn.getLayoutParams().setMargins(5, 0, 0, 0)
     
     buttonRow.addView(saveBtn)
     buttonRow.addView(backBtn)
     mainLayout.addView(buttonRow)
     
-    saveBtn.setOnClickListener(function()
-        local newKey = keyInput.getText().toString()
-        local newModel = GEMINI_MODELS[modelSpinner.getSelectedItemPosition() + 1]
-        if newKey and newKey ~= "" then saveGeminiApiKey(newKey) end
-        if newModel then saveGeminiModel(newModel) end
-        setApiTypingEnabled(true)
-        service.speak("Settings saved")
-        dlg.dismiss()
-        if mainDlg then mainDlg.show() end
-    end)
+    local function updateSettingsUI(engine)
+        settingsContainer.removeAllViews()
+        if engine == "groq" then
+            local groqKeyLabel = TextView(service)
+            groqKeyLabel.setText("Groq API Key:")
+            groqKeyLabel.setTextSize(14)
+            groqKeyLabel.setTextColor(0xFFFFFFFF)
+            groqKeyLabel.setPadding(0, 0, 0, 10)
+            settingsContainer.addView(groqKeyLabel)
+            
+            local groqKeyInput = EditText(service)
+            groqKeyInput.setHint("Enter Groq API Key")
+            local savedGroqKey = getGroqApiKey()
+            if savedGroqKey ~= "" then groqKeyInput.setText(savedGroqKey) end
+            groqKeyInput.setTextSize(14)
+            groqKeyInput.setPadding(20, 15, 20, 15)
+            groqKeyInput.setBackgroundColor(0xFF222222)
+            local groqKeyParams = LinearLayout.LayoutParams(-1, -2)
+            groqKeyParams.setMargins(0, 0, 0, 15)
+            groqKeyInput.setLayoutParams(groqKeyParams)
+            settingsContainer.addView(groqKeyInput)
+            
+            local groqModelLabel = TextView(service)
+            groqModelLabel.setText("Select Model:")
+            groqModelLabel.setTextSize(14)
+            groqModelLabel.setTextColor(0xFFFFFFFF)
+            groqModelLabel.setPadding(0, 0, 0, 10)
+            settingsContainer.addView(groqModelLabel)
+            
+            local groqModelSpinner = Spinner(service)
+            local groqAdapter = ArrayAdapter(service, android.R.layout.simple_spinner_item, GROQ_MODELS)
+            groqAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            groqModelSpinner.setAdapter(groqAdapter)
+            local currentGroqModel = getGroqModel()
+            for i, m in ipairs(GROQ_MODELS) do
+                if m == currentGroqModel then groqModelSpinner.setSelection(i-1) break end
+            end
+            local groqSpinnerParams = LinearLayout.LayoutParams(-1, -2)
+            groqSpinnerParams.setMargins(0, 0, 0, 15)
+            groqModelSpinner.setLayoutParams(groqSpinnerParams)
+            settingsContainer.addView(groqModelSpinner)
+            
+            saveBtn.setOnClickListener(function()
+                local key = groqKeyInput.getText().toString()
+                local model = GROQ_MODELS[groqModelSpinner.getSelectedItemPosition() + 1]
+                if key ~= "" then saveGroqApiKey(key) end
+                if model then saveGroqModel(model) end
+                saveCustomInstruction(instructionInput.getText().toString())
+                saveSelectedAIEngine("groq")
+                saveAllSettings()
+                service.speak("Settings saved")
+                dlg.dismiss()
+                if mainDlg then mainDlg.show() end
+            end)
+        else
+            local geminiKeyLabel = TextView(service)
+            geminiKeyLabel.setText("Gemini API Key:")
+            geminiKeyLabel.setTextSize(14)
+            geminiKeyLabel.setTextColor(0xFFFFFFFF)
+            geminiKeyLabel.setPadding(0, 0, 0, 10)
+            settingsContainer.addView(geminiKeyLabel)
+            
+            local geminiKeyInput = EditText(service)
+            geminiKeyInput.setHint("Enter Gemini API Key")
+            local savedGeminiKey = getGeminiApiKey()
+            if savedGeminiKey ~= "" then geminiKeyInput.setText(savedGeminiKey) end
+            geminiKeyInput.setTextSize(14)
+            geminiKeyInput.setPadding(20, 15, 20, 15)
+            geminiKeyInput.setBackgroundColor(0xFF222222)
+            local geminiKeyParams = LinearLayout.LayoutParams(-1, -2)
+            geminiKeyParams.setMargins(0, 0, 0, 15)
+            geminiKeyInput.setLayoutParams(geminiKeyParams)
+            settingsContainer.addView(geminiKeyInput)
+            
+            local geminiModelLabel = TextView(service)
+            geminiModelLabel.setText("Select Model:")
+            geminiModelLabel.setTextSize(14)
+            geminiModelLabel.setTextColor(0xFFFFFFFF)
+            geminiModelLabel.setPadding(0, 0, 0, 10)
+            settingsContainer.addView(geminiModelLabel)
+            
+            local geminiModelSpinner = Spinner(service)
+            local geminiAdapter = ArrayAdapter(service, android.R.layout.simple_spinner_item, GEMINI_MODELS)
+            geminiAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            geminiModelSpinner.setAdapter(geminiAdapter)
+            local currentGeminiModel = getGeminiModel()
+            for i, m in ipairs(GEMINI_MODELS) do
+                if m == currentGeminiModel then geminiModelSpinner.setSelection(i-1) break end
+            end
+            local geminiSpinnerParams = LinearLayout.LayoutParams(-1, -2)
+            geminiSpinnerParams.setMargins(0, 0, 0, 15)
+            geminiModelSpinner.setLayoutParams(geminiSpinnerParams)
+            settingsContainer.addView(geminiModelSpinner)
+            
+            saveBtn.setOnClickListener(function()
+                local key = geminiKeyInput.getText().toString()
+                local model = GEMINI_MODELS[geminiModelSpinner.getSelectedItemPosition() + 1]
+                if key ~= "" then saveGeminiApiKey(key) end
+                if model then saveGeminiModel(model) end
+                saveCustomInstruction(instructionInput.getText().toString())
+                saveSelectedAIEngine("gemini")
+                saveAllSettings()
+                service.speak("Settings saved")
+                dlg.dismiss()
+                if mainDlg then mainDlg.show() end
+            end)
+        end
+    end
+    
+    engineSpinner.setOnItemSelectedListener({
+        onItemSelected = function(parent, view, position, id)
+            local selectedEngine = engines[position+1]:lower()
+            updateSettingsUI(selectedEngine)
+        end,
+        onNothingSelected = function() end
+    })
+    
+    updateSettingsUI(currentEngine)
     
     backBtn.setOnClickListener(function()
         dlg.dismiss()
@@ -287,7 +514,7 @@ function showAISettingsDialog(mainDlg)
 end
 
 -- ============================================================
--- زبانیں (صرف چار منتخب زبانیں)
+-- زبانیں
 -- ============================================================
 local allLanguages = {
   {name = "English (Pakistan)", code = "en-PK"},
@@ -352,6 +579,44 @@ end
 -- ============================================================
 -- DICTIONARY FUNCTIONS
 -- ============================================================
+function cleanCorruptedDictionaryEntries()
+  if not changeTable then return end
+  local cleanedTable = {}
+  for wrong, correct in pairs(changeTable) do
+    local isWrongValid = wrong and wrong ~= "" and utf8 and utf8.len(wrong) > 1
+    local isCorrectValid = correct and correct ~= "" and utf8 and utf8.len(correct) > 1
+    
+    if isWrongValid and isCorrectValid then
+      cleanedTable[wrong] = correct
+    end
+  end
+  changeTable = cleanedTable
+end
+
+-- Add common Alif Madda words to dictionary
+function addAlifMaddaWords()
+  local alifMaddaMap = {
+    ["اپ"] = "آپ",
+    ["اج"] = "آج",
+    ["انا"] = "آنا",
+    ["ادمی"] = "آدمی",
+    ["اسمان"] = "آسمان",
+    ["اگ"] = "آگ",
+    ["اٹا"] = "آٹا",
+    ["استان"] = "آستان",
+    ["اہ"] = "آہ",
+    ["ارام"] = "آرام",
+    ["ازما"] = "آزما",
+    ["باد"] = "آباد",
+  }
+  for wrong, correct in pairs(alifMaddaMap) do
+    if not changeTable[wrong] then
+      changeTable[wrong] = correct
+    end
+  end
+  saveDictionary()
+end
+
 function loadDictionary()
   local f = io.open(dictFile, "r")
   if f then
@@ -365,16 +630,28 @@ function loadDictionary()
         local dict = func()
         if type(dict) == "table" then
           changeTable = dict
+          cleanCorruptedDictionaryEntries()
+          -- Ensure common Alif Madda words exist
+          addAlifMaddaWords()
           return
         end
       end
     end
   end
   changeTable = {}
+  addAlifMaddaWords()
+end
+
+-- FIXED: Clear All کرنے پر اب مستقل فائل میں بھی ڈیٹا ڈیلیٹ (Save) ہوگا
+function clearAllDictionary()
+  changeTable = {}
+  addAlifMaddaWords() -- re-add common words after clearing
+  saveDictionary()
 end
 
 function saveDictionary()
   ensureBackupFolder()
+  cleanCorruptedDictionaryEntries()
   local f = io.open(dictFile, "w")
   if f then
     local items = {}
@@ -390,6 +667,7 @@ end
 
 function addToDictionary(wrongWord, correctWord)
   if wrongWord and correctWord and wrongWord ~= "" and correctWord ~= "" then
+    if utf8 and (utf8.len(wrongWord) <= 1 or utf8.len(correctWord) <= 1) then return false end
     changeTable[wrongWord] = correctWord
     saveDictionary()
     return true
@@ -406,209 +684,224 @@ function deleteFromDictionary(wrongWord)
   return false
 end
 
-function clearAllDictionary()
-  changeTable = {}
-  saveDictionary()
-end
-
+-- ڈکشنری متبادل لاجک جو الفاظ کو تبدیل کرتی ہے
 function applyDictionaryReplacements(text)
   if not text or text == "" then return text end
   local result = text
   for wrong, correct in pairs(changeTable) do
-    local pattern = escapePattern(wrong)
-    result = result:gsub(pattern, correct)
+    if wrong and wrong ~= "" and correct and correct ~= "" then
+      local pattern = "%f[%a%d\128-\255]" .. escapePattern(wrong) .. "%f[%s%p\0]"
+      local ok, replaced = pcall(function() return result:gsub(pattern, correct) end)
+      if ok then result = replaced else
+        local patternSimple = escapePattern(wrong)
+        result = result:gsub(patternSimple, correct)
+      end
+    end
   end
   return result
 end
 
--- ============================================================
--- AI سیکھنے کا فنکشن
--- ============================================================
-function learnFromAI(rawText, aiText)
-  if not rawText or not aiText then return end
-
-  local function clean(w)
-    return (w:gsub("^[%p%s،۔؟!]+", ""):gsub("[%p%s،۔؟!]+$", ""))
-  end
-
-  local rawWords = {}
-  for w in rawText:gmatch("%S+") do
-    local cw = clean(w)
-    if cw ~= "" then table.insert(rawWords, cw) end
-  end
-
-  local aiWords = {}
-  for w in aiText:gmatch("%S+") do
-    local cw = clean(w)
-    if cw ~= "" then table.insert(aiWords, cw) end
-  end
-
-  if #rawWords == #aiWords then
-    for i = 1, #rawWords do
-      local rw = rawWords[i]
-      local aw = aiWords[i]
-      if rw ~= aw then
-        addToDictionary(rw, aw)
-      end
-    end
-    return
-  end
-
-  -- الف/الف مد کی خصوصی تبدیلی
-  for _, rw in ipairs(rawWords) do
-    if rw:find("^[اآ]") then
-      local base = rw:sub(2)
-      local altStart = (rw:find("^ا") and "آ") or "ا"
-      local altWord = altStart .. base
-      for _, aw in ipairs(aiWords) do
-        if aw == altWord then
-          addToDictionary(rw, altWord)
-          break
-        end
-      end
-    end
-  end
-
-  -- عام قریبی مماثلت
-  for _, rw in ipairs(rawWords) do
-    local alreadyCorrected = false
-    for _, aw in ipairs(aiWords) do
-      if rw == aw then alreadyCorrected = true break end
-    end
-    if not alreadyCorrected then
-      for _, aw in ipairs(aiWords) do
-        if aw ~= rw and math.abs(#aw - #rw) <= 2 then
-          addToDictionary(rw, aw)
-          break
-        end
-      end
-    end
-  end
+-- ڈکشنری مینیجر مینو (اصل لاجک اور لے آؤٹ)
+function showDictionaryManager()
+  local dlg = LuaDialog(service)
+  dlg.setTitle("Digital Dictionary")
+  local layout = {
+    LinearLayout; orientation = "vertical"; padding = "25dp";
+    { Button; text = "Add Word"; layout_width = "fill"; layout_marginBottom = "15dp"; onClick = function() showAddWordDialog() end; };
+    { Button; text = "View / Delete Words"; layout_width = "fill"; layout_marginBottom = "15dp"; onClick = function() showViewWordsDialog() end; };
+    { Button; text = "Close"; layout_width = "fill"; onClick = function() dlg.dismiss() end; };
+  }
+  dlg.setView(loadlayout(layout))
+  dlg.show()
 end
 
--- ============================================================
--- ڈکشنری ڈائیلاگ
--- ============================================================
-function showDictionaryDialog()
+function showAddWordDialog()
   local dlg = LuaDialog(service)
-  dlg.setTitle("Add to Dictionary")
+  dlg.setTitle("Add Word Replacement")
   local layout = {
     LinearLayout; orientation = "vertical"; padding = "20dp";
-    { EditText; id = "wrongWord"; hint = "Wrong word"; textSize = "16sp"; layout_width = "fill"; layout_marginBottom = "15dp"; };
-    { EditText; id = "correctWord"; hint = "Correct word"; textSize = "16sp"; layout_width = "fill"; layout_marginBottom = "15dp"; };
-    { Button; text = "Add to Dictionary"; textSize = "16sp"; layout_width = "fill"; onClick = function()
-        local wrong = wrongWord.getText().toString()
-        local correct = correctWord.getText().toString()
-        if wrong ~= "" and correct ~= "" then
-          addToDictionary(wrong, correct)
-          service.speak("Added: " .. wrong .. " → " .. correct)
-          dlg.dismiss()
-        else
-          service.speak("Both fields required")
-        end
-      end;
+    { TextView; text = "Wrong Word Spoken:"; };
+    { EditText; id = "wrongInput"; layout_width = "fill"; layout_marginBottom = "15dp"; };
+    { TextView; text = "Correct Word to Replace With:"; };
+    { EditText; id = "correctInput"; layout_width = "fill"; layout_marginBottom = "20dp"; };
+    { LinearLayout; orientation = "horizontal"; layout_width = "fill";
+      { Button; text = "Save"; layout_width = "0dp"; layout_weight = 1; onClick = function()
+          local w = wrongInput.getText().toString():trim()
+          local c = correctInput.getText().toString():trim()
+          if w ~= "" and c ~= "" then
+            if addToDictionary(w, c) then
+              service.speak("Saved successfully")
+              dlg.dismiss()
+            else
+              service.speak("Failed to save. Words too short.")
+            end
+          else
+            service.speak("Fields cannot be empty")
+          end
+        end;
+      };
+      { Button; text = "Cancel"; layout_width = "0dp"; layout_weight = 1; onClick = function() dlg.dismiss() end; };
     };
   }
   dlg.setView(loadlayout(layout))
   dlg.show()
 end
 
-function showDictionaryList()
-  loadDictionary()
-  if next(changeTable) == nil then
-    service.speak("Dictionary is empty")
-    return
-  end
-  local itemsList = {}
-  for wrong, correct in pairs(changeTable) do
-    local display = "Wrong: " .. wrong .. ", Correct: " .. correct
-    table.insert(itemsList, {wrong = wrong, correct = correct, display = display})
-  end
-  local displayItems = {}
-  for _, item in ipairs(itemsList) do table.insert(displayItems, item.display) end
+function showViewWordsDialog()
   local dlg = LuaDialog(service)
-  dlg.setTitle("Dictionary List (Long press to delete)")
-  local layout = {
-    LinearLayout; orientation = "vertical"; padding = "10dp";
-    { Button; text = "Empty Dictionary"; textSize = "14sp"; layout_width = "fill"; layout_marginBottom = "10dp"; onClick = function()
-        local confirmDlg = LuaDialog(service)
-        confirmDlg.setTitle("Clear Dictionary")
-        confirmDlg.setMessage("Are you sure you want to delete ALL dictionary entries?")
-        confirmDlg.setButton("Yes", function()
-          clearAllDictionary()
-          service.speak("Dictionary cleared")
-          confirmDlg.dismiss()
-          dlg.dismiss()
-          showDictionaryList()
-        end)
-        confirmDlg.setButton2("No", function() confirmDlg.dismiss() end)
-        confirmDlg.show()
-      end;
-    };
-    { ListView; id = "list"; layout_width = "fill"; layout_height = "400dp"; };
-    { Button; text = "Close"; layout_width = "fill"; onClick = function() dlg.dismiss() end; };
-  }
-  local view = loadlayout(layout)
-  local adapter = ArrayAdapter(service, android.R.layout.simple_list_item_1, displayItems)
+  dlg.setTitle("Dictionary Words")
+  
+  local list = ListView(service)
+  local wordsList = {}
+  local rawKeys = {}
+  
+  for k, v in pairs(changeTable) do
+    table.insert(rawKeys, k)
+    table.insert(wordsList, k .. " -> " .. v)
+  end
+  
+  local adapter = ArrayAdapter(service, android.R.layout.simple_list_item_1, wordsList)
   list.setAdapter(adapter)
-  list.setOnItemLongClickListener(function(parent, v, position, id)
-    local selectedDisplay = displayItems[position + 1]
-    local wrongWord = nil
-    for _, item in ipairs(itemsList) do
-      if item.display == selectedDisplay then wrongWord = item.wrong break end
-    end
-    if wrongWord then
-      local confirmDlg = LuaDialog(service)
-      confirmDlg.setTitle("Delete Word")
-      confirmDlg.setMessage("Delete " .. wrongWord .. " from dictionary?")
-      confirmDlg.setButton("Yes", function()
-        deleteFromDictionary(wrongWord)
-        service.speak("Deleted: " .. wrongWord)
-        confirmDlg.dismiss()
-        dlg.dismiss()
-        showDictionaryList()
-      end)
-      confirmDlg.setButton2("No", function() confirmDlg.dismiss() end)
-      confirmDlg.show()
-    end
-    return true
+  
+  list.setOnItemClickListener(function(parent, view, position, id)
+    local selectedKey = rawKeys[position+1]
+    local askDlg = LuaDialog(service)
+    askDlg.setTitle("Delete Entry")
+    askDlg.setMessage("Do you want to delete this word replacement?")
+    askDlg.setButton("Delete", function()
+      deleteFromDictionary(selectedKey)
+      service.speak("Deleted")
+      askDlg.dismiss()
+      dlg.dismiss()
+      showViewWordsDialog()
+    end)
+    askDlg.setButton2("Cancel", function() askDlg.dismiss() end)
+    askDlg.show()
   end)
-  dlg.setView(view)
+  
+  -- FIXED: Empty بٹن پر اب مستقل طور پر ڈیٹا فائل سے صاف ہوگا
+  dlg.setButton("Empty", function()
+    local confirmDlg = LuaDialog(service)
+    confirmDlg.setTitle("Clear All")
+    confirmDlg.setMessage("Are you sure you want to clear the entire dictionary?")
+    confirmDlg.setButton("Clear All", function()
+      clearAllDictionary()
+      service.speak("Dictionary cleared completely")
+      confirmDlg.dismiss()
+      dlg.dismiss()
+    end)
+    confirmDlg.setButton2("Cancel", function() confirmDlg.dismiss() end)
+    confirmDlg.show()
+  end)
+  
+  dlg.setButton2("Close", function() dlg.dismiss() end)
+  dlg.setView(list)
   dlg.show()
 end
 
-function showDigitalDictionary()
+-- ============================================================
+-- اسمارٹ لرننگ لاجک
+-- ============================================================
+function learnFromAI(rawText, aiText)
+  if not rawText or not aiText then return end
+
+  local function clean(w)
+    return (w:gsub("^[%p%s،۔?!" .. "]+", ""):gsub("[%p%s%،۔?!" .. "]+$", ""))
+  end
+
+  local rawWords = {}
+  for w in rawText:gmatch("%S+") do
+    local cw = clean(w)
+    if cw ~= "" and utf8 and utf8.len(cw) > 1 then table.insert(rawWords, cw) end
+  end
+
+  local aiWords = {}
+  for w in aiText:gmatch("%S+") do
+    local cw = clean(w)
+    if cw ~= "" and utf8 and utf8.len(cw) > 1 then table.insert(aiWords, cw) end
+  end
+
+  -- صورتِ حال 1: جب API چل رہی ہو اور لفظ تبدیل ہوا ہو
+  if rawText ~= aiText then
+    local maxLoop = math.min(#rawWords, #aiWords)
+    for i = 1, maxLoop do
+      local rw = rawWords[i]
+      local aw = aiWords[i]
+      if rw ~= aw then
+        if rw:find("^ا") and aw:find("^آ") then
+          addToDictionary(rw, aw)
+        elseif rw:find("^%a+$") or aw:find("^%a+$") then
+          addToDictionary(rw, aw)
+        end
+      end
+    end
+  else
+    -- صورتِ حال 2: جب API بند ہو (Without API) اور ٹیکسٹ بالکل سیم ہو
+    for i = 1, #rawWords do
+      local word = rawWords[i]
+      if word:find("^ا") and not word:find("^آ") then
+        local correctedWord = word:gsub("^ا", "آ")
+        addToDictionary(word, correctedWord)
+      elseif word:find("^%a+$") then
+        addToDictionary(word, word)
+      end
+    end
+  end
+end
+
+-- ============================================================
+-- زبان کا نام حاصل کرنے والا ہیلپر
+-- ============================================================
+function getLanguageNameFromCode(code)
+  for _, lang in ipairs(allLanguages) do
+    if lang.code == code then return lang.name end
+  end
+  return code
+end
+
+function showLanguagePicker(callback)
   local dlg = LuaDialog(service)
-  dlg.setTitle("Digital Dictionary")
+  dlg.setTitle("Select Language")
+  local list = ListView(service)
+  local adapter = ArrayAdapter(service, android.R.layout.simple_list_item_1, languageItems)
+  list.setAdapter(adapter)
+  list.setOnItemClickListener(function(parent, view, position, id)
+    local selectedCode = languageCodes[position+1]
+    local selectedName = languageItems[position+1]
+    callback(selectedCode, selectedName)
+    service.speak("Selected " .. selectedName)
+    dlg.dismiss()
+  end)
+  dlg.setView(list)
+  dlg.show()
+end
+
+function showBackupRestoreDialog()
+  local dlg = LuaDialog(service)
+  dlg.setTitle("Backup / Restore")
   local layout = {
     LinearLayout; orientation = "vertical"; padding = "25dp";
-    { TextView; text = "Manage your custom word replacements"; textSize = "14sp"; textColor = "#666666"; layout_marginBottom = "20dp"; gravity = "center"; };
-    { Button; text = "Add New Entry"; textSize = "16sp"; layout_width = "fill"; layout_marginBottom = "15dp"; onClick = function()
-        dlg.dismiss()
-        showDictionaryDialog()
+    { Button; text = "Backup Dictionary"; layout_width = "fill"; layout_marginBottom = "15dp"; onClick = function() backupDictionary() end; };
+    { Button; text = "Backup Settings"; layout_width = "fill"; layout_marginBottom = "15dp"; onClick = function() backupSettings() end; };
+    { Button; text = "Restore Dictionary"; layout_width = "fill"; layout_marginBottom = "15dp"; onClick = function()
+        if copyFile(dictBackupFile, dictFile) then
+          loadDictionary()
+          service.speak("Dictionary restored successfully")
+        else
+          service.speak("No backup found")
+        end
       end;
     };
-    { Button; text = "View / Edit Dictionary"; textSize = "16sp"; layout_width = "fill"; layout_marginBottom = "15dp"; onClick = function()
-        dlg.dismiss()
-        showDictionaryList()
+    { Button; text = "Restore Settings"; layout_width = "fill"; layout_marginBottom = "15dp"; onClick = function()
+        if copyFile(settingsBackupFile, settingsFile) then
+          loadAllSettings()
+          service.speak("Settings restored successfully")
+        else
+          service.speak("No backup found")
+        end
       end;
     };
-    { Button; text = "Clear All Dictionary"; textSize = "16sp"; layout_width = "fill"; layout_marginBottom = "15dp"; onClick = function()
-        local confirmDlg = LuaDialog(service)
-        confirmDlg.setTitle("Clear All Entries")
-        confirmDlg.setMessage("Are you sure you want to remove EVERY word from the dictionary?")
-        confirmDlg.setButton("Yes", function()
-          clearAllDictionary()
-          service.speak("All dictionary entries cleared")
-          confirmDlg.dismiss()
-          dlg.dismiss()
-        end)
-        confirmDlg.setButton2("No", function() confirmDlg.dismiss() end)
-        confirmDlg.show()
-      end;
-    };
-    { View; layout_width = "fill"; layout_height = "1dp"; backgroundColor = "#CCCCCC"; layout_marginTop = "10dp"; layout_marginBottom = "15dp"; };
-    { Button; text = "Back to Main Menu"; textSize = "16sp"; layout_width = "fill"; onClick = function() dlg.dismiss() end; };
+    { Button; text = "Close"; layout_width = "fill"; onClick = function() dlg.dismiss() end; };
   }
   dlg.setView(loadlayout(layout))
   dlg.show()
@@ -634,6 +927,10 @@ function loadAllSettings()
           settings.punctuation = data.punctuation or "newline"
           settings.showLangDialog = (data.showLangDialog == nil) and true or data.showLangDialog
           settings.autoCorrectUrdu = true
+          
+          if data.apiTypingEnabled ~= nil then
+            setApiTypingEnabled(data.apiTypingEnabled)
+          end
           return true
         end
       end
@@ -650,7 +947,8 @@ function saveAllSettings()
     favourites = favouriteIndices,
     punctuation = settings.punctuation,
     showLangDialog = settings.showLangDialog,
-    autoCorrectUrdu = settings.autoCorrectUrdu
+    autoCorrectUrdu = settings.autoCorrectUrdu,
+    apiTypingEnabled = isApiTypingEnabled()
   }
   local content = "return " .. dumpTable(allSettings)
   local f = io.open(settingsFile, "w")
@@ -674,232 +972,71 @@ function applyEndPunctuation(text)
   return text
 end
 
-function showPunctuationSettingsDialog()
-  local dlg = LuaDialog(service)
-  dlg.setTitle("Punctuation Settings")
-  local currentPunct = settings.punctuation
-  local punctOptions = {"New line", "Dot only", "Space only", "None"}
-  local punctValues = {"newline", "dot_only", "space_only", "none"}
-  local selectedIndex = 0
-  for i, v in ipairs(punctValues) do if v == currentPunct then selectedIndex = i break end end
-  local layout = {
-    LinearLayout; orientation = "vertical"; padding = "20dp";
-    { TextView; text = "End of sentence:"; textSize = "16sp"; layout_marginBottom = "10dp"; };
-    { Spinner; id = "punctSpinner"; layout_width = "fill"; layout_marginBottom = "20dp"; };
-    { Button; text = "Save Settings"; layout_width = "fill"; onClick = function()
-        settings.punctuation = punctValues[punctSpinner.getSelectedItemPosition() + 1]
+-- ============================================================
+-- FIXED: PUNCTUATION SETTINGS DIALOG (button click ab kaam karega)
+-- ============================================================
+function showPunctuationDialog()
+    local dlg = LuaDialog(service)
+    dlg.setTitle("Punctuation Settings")
+    
+    local options = {"None", "Dot Only (.)", "Space Only ( )", "New Line (\\n)"}
+    local codes = {"none", "dot_only", "space_only", "newline"}
+    
+    -- موجودہ ویلیو کے مطابق اسپنر میں پوزیشن
+    local currentCode = settings.punctuation or "newline"
+    local currentIndex = 0
+    for i, code in ipairs(codes) do
+        if code == currentCode then
+            currentIndex = i - 1
+            break
+        end
+    end
+    
+    -- Spinner banayein
+    local spinner = Spinner(service)
+    local adapter = ArrayAdapter(service, android.R.layout.simple_spinner_item, options)
+    adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+    spinner.setAdapter(adapter)
+    spinner.setSelection(currentIndex)
+    
+    -- LinearLayout (main container)
+    local layout = LinearLayout(service)
+    layout.setOrientation(1)
+    layout.setPadding(40, 30, 40, 30)
+    
+    -- Heading TextView
+    local heading = TextView(service)
+    heading.setText("Choose punctuation style:")
+    heading.setTextSize(16)
+    heading.setTextColor(0xFFFFFFFF)
+    heading.setPadding(0, 0, 0, 20)
+    layout.addView(heading)
+    
+    -- Spinner add karein
+    layout.addView(spinner)
+    
+    -- Save button
+    local saveBtn = Button(service)
+    saveBtn.setText("Save")
+    saveBtn.setTextSize(14)
+    saveBtn.setBackgroundColor(0xFF4CAF50)
+    saveBtn.setPadding(0, 15, 0, 15)
+    local btnParams = LinearLayout.LayoutParams(-1, -2)
+    btnParams.topMargin = 30
+    saveBtn.setLayoutParams(btnParams)
+    layout.addView(saveBtn)
+    
+    -- Button click listener (ab yeh kaam karega)
+    saveBtn.setOnClickListener(function()
+        local selectedPos = spinner.getSelectedItemPosition()
+        settings.punctuation = codes[selectedPos + 1]
         saveAllSettings()
-        service.speak("Settings saved")
+        service.speak("Punctuation set to " .. options[selectedPos + 1])
         dlg.dismiss()
-      end;
-    };
-  }
-  local view = loadlayout(layout)
-  local adapter = ArrayAdapter(service, android.R.layout.simple_spinner_item, punctOptions)
-  adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-  punctSpinner.setAdapter(adapter)
-  punctSpinner.setSelection(selectedIndex - 1)
-  dlg.setView(view)
-  dlg.show()
-end
-
--- ============================================================
--- BACKUP / RESTORE
--- ============================================================
-function backupDictionary()
-  ensureBackupFolder()
-  if saveDictionary() then
-    if copyFile(dictFile, dictBackupFile) then
-      service.speak("Dictionary backup completed.")
-    else
-      service.speak("Dictionary backup failed.")
-    end
-  end
-end
-
-function backupSettings()
-  ensureBackupFolder()
-  if saveAllSettings() then
-    if copyFile(settingsFile, settingsBackupFile) then
-      service.speak("Settings backup completed.")
-    else
-      service.speak("Settings backup failed.")
-    end
-  end
-end
-
-function getBackupTextFiles()
-  local folder = File(backupFolder)
-  if not folder.exists() then return {} end
-  local files = {}
-  local list = folder.listFiles()
-  if list == nil then return {} end
-  for i = 0, #list - 1 do
-    local f = list[i]
-    if f.isFile() and f.getName():match("%.txt$") then
-      if f.getName() ~= "dictionary.txt" and f.getName() ~= "digital_typer_settings.txt" then
-        table.insert(files, {path = f.getPath(), name = f.getName(), size = f.length()})
-      end
-    end
-  end
-  return files
-end
-
-function isValidDictionaryFile(filePath)
-  local f = io.open(filePath, "r")
-  if not f then return false end
-  local content = f:read("*all")
-  f:close()
-  if not content or content == "" then return false end
-  content = content:gsub("^\239\187\191", "")
-  local func = loadstring("return " .. content)
-  if not func then func = loadstring(content) end
-  if not func then return false end
-  local ok, dict = pcall(func)
-  return ok and type(dict) == "table"
-end
-
-function isValidSettingsFile(filePath)
-  local f = io.open(filePath, "r")
-  if not f then return false end
-  local content = f:read("*all")
-  f:close()
-  if not content or content == "" then return false end
-  content = content:gsub("^\239\187\191", "")
-  local func = loadstring(content)
-  if not func then func = loadstring(content) end
-  if not func then return false end
-  local ok, data = pcall(func)
-  return ok and type(data) == "table"
-end
-
-function restoreDictionary()
-  local files = getBackupTextFiles()
-  local dictFiles = {}
-  for _, f in ipairs(files) do if isValidDictionaryFile(f.path) then table.insert(dictFiles, f) end end
-  if #dictFiles == 0 then service.speak("No valid backup found") return end
-  local dlg = LuaDialog(service)
-  dlg.setTitle("Restore Dictionary")
-  local layout = {
-    LinearLayout; orientation = "vertical"; padding = "10dp";
-    { ListView; id = "fileList"; layout_width = "fill"; layout_height = "400dp"; };
-    { Button; text = "Cancel"; layout_width = "fill"; onClick = function() dlg.dismiss() end; };
-  }
-  local view = loadlayout(layout)
-  local displayNames = {}
-  for _, f in ipairs(dictFiles) do table.insert(displayNames, f.name) end
-  fileList.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, displayNames))
-  fileList.onItemClick = function(l, v, p, i)
-    local selected = dictFiles[p+1]
-    if copyFile(selected.path, dictFile) then
-      loadDictionary()
-      service.speak("Dictionary restored.")
-      dlg.dismiss()
-    end
-  end
-  dlg.setView(view)
-  dlg.show()
-end
-
-function restoreSettings()
-  local files = getBackupTextFiles()
-  local settingsFiles = {}
-  for _, f in ipairs(files) do if isValidSettingsFile(f.path) then table.insert(settingsFiles, f) end end
-  if #settingsFiles == 0 then service.speak("No valid settings backup found") return end
-  local dlg = LuaDialog(service)
-  dlg.setTitle("Restore Settings")
-  local layout = {
-    LinearLayout; orientation = "vertical"; padding = "10dp";
-    { ListView; id = "fileList"; layout_width = "fill"; layout_height = "400dp"; };
-    { Button; text = "Cancel"; layout_width = "fill"; onClick = function() dlg.dismiss() end; };
-  }
-  local view = loadlayout(layout)
-  local displayNames = {}
-  for _, f in ipairs(settingsFiles) do table.insert(displayNames, f.name) end
-  fileList.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, displayNames))
-  fileList.onItemClick = function(l, v, p, i)
-    local selected = settingsFiles[p+1]
-    if copyFile(selected.path, settingsFile) then
-      loadAllSettings()
-      service.speak("Settings restored.")
-      dlg.dismiss()
-    end
-  end
-  dlg.setView(view)
-  dlg.show()
-end
-
-function showDeleteFilePicker()
-  local files = getBackupTextFiles()
-  if #files == 0 then service.speak("No files to delete") return end
-  local dlg = LuaDialog(service)
-  dlg.setTitle("Delete Backup File")
-  local layout = {
-    LinearLayout; orientation = "vertical"; padding = "10dp";
-    { ListView; id = "fileList"; layout_width = "fill"; layout_height = "400dp"; };
-    { Button; text = "Cancel"; layout_width = "fill"; onClick = function() dlg.dismiss() end; };
-  }
-  local view = loadlayout(layout)
-  local displayNames = {}
-  for _, f in ipairs(files) do table.insert(displayNames, f.name) end
-  fileList.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, displayNames))
-  fileList.onItemClick = function(l, v, p, i)
-    local selected = files[p+1]
-    File(selected.path).delete()
-    service.speak("File deleted.")
-    dlg.dismiss()
-  end
-  dlg.setView(view)
-  dlg.show()
-end
-
--- ============================================================
--- LANGUAGE PICKER AND FAVOURITES
--- ============================================================
-function getLanguageNameFromCode(code)
-  if not languageCodes then return "Unknown" end
-  for i, c in ipairs(languageCodes) do if c == code then return languageItems[i] end end
-  return "Unknown"
-end
-
-function showLanguagePicker(callback, title)
-  local dlg = LuaDialog(service)
-  dlg.setTitle(title or "Select Language")
-  local layout = {
-    LinearLayout; orientation = "vertical"; padding = "10dp";
-    { ListView; id = "langList"; layout_width = "fill"; layout_height = "wrap_content"; };
-  }
-  local view = loadlayout(layout)
-  langList.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, languageItems))
-  langList.onItemClick = function(l, v, p, i)
-    local selectedItem = languageItems[p+1]
-    callback(languageCodes[p+1], selectedItem)
-    dlg.dismiss()
-  end
-  dlg.setView(view)
-  dlg.show()
-end
-
-function showFavouritesDialog()
-  if #favouriteIndices == 0 then service.speak("No favourites") return end
-  local favItems = {}
-  for _, idx in ipairs(favouriteIndices) do table.insert(favItems, languageItems[idx]) end
-  local dlg = LuaDialog(service)
-  dlg.setTitle("★ Favourite Languages ★")
-  local layout = {
-    LinearLayout; orientation = "vertical"; padding = "10dp";
-    { ListView; id = "favList"; layout_width = "fill"; layout_height = "wrap_content"; };
-    { Button; text = "Clear All"; layout_width = "fill"; onClick = function() favouriteIndices = {} saveAllSettings() dlg.dismiss() end; };
-  }
-  favList.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, favItems))
-  favList.onItemClick = function(l,v,p,i)
-    primaryLangCode = languageCodes[favouriteIndices[p+1]]
-    saveAllSettings()
-    service.speak("Primary set.")
-    dlg.dismiss()
-  end
-  dlg.setView(loadlayout(layout))
-  dlg.show()
+    end)
+    
+    dlg.setView(layout)
+    dlg.show()
 end
 
 -- ============================================================
@@ -912,28 +1049,30 @@ function startVoiceTyping(langCode)
       local res = results.getParcelableArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
       if res and res.size() > 0 then
         local rawText = res.get(0)
-        local function fallback()
-          local finalText = rawText
+        
+        local function fallback(textToUse)
+          local finalText = textToUse or rawText
+          learnFromAI(rawText, finalText)
           finalText = applyDictionaryReplacements(finalText)
           finalText = applyEndPunctuation(finalText)
           service.insertText(service.getEditText(), finalText)
           service.speak(finalText)
         end
         
-        if isApiTypingEnabled() and getGeminiApiKey() ~= "" then
+        if isApiTypingEnabled() then
           processWithAI(rawText, function(aiText)
-            if aiText then
+            if aiText and aiText ~= "" then
               learnFromAI(rawText, aiText)
-              local finalText = aiText
+              local finalText = applyDictionaryReplacements(aiText)
               finalText = applyEndPunctuation(finalText)
               service.insertText(service.getEditText(), finalText)
               service.speak(finalText)
             else
-              fallback()
+              fallback(rawText)
             end
           end)
         else
-          fallback()
+          fallback(rawText)
         end
       end
       speechRec.destroy()
@@ -970,18 +1109,7 @@ function showTypingDialog()
 end
 
 -- ============================================================
--- WhatsApp
--- ============================================================
-function openWhatsApp()
-  local url = "https://wa.me/923477583735?text=Hello"
-  local intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-  intent.setPackage("com.whatsapp")
-  intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-  service.startActivity(intent)
-end
-
--- ============================================================
--- MAIN MENU
+-- MAIN MENU (Favourite Languages button removed)
 -- ============================================================
 function showMainMenu()
   local dlg = LuaDialog()
@@ -991,19 +1119,11 @@ function showMainMenu()
     { Button; id = "toggleBtn"; layout_width = "fill"; layout_marginBottom = "10dp"; };
     { Button; text = "Set Primary Language"; layout_width = "fill"; layout_marginBottom = "10dp"; onClick = function() showLanguagePicker(function(c, n) primaryLangCode = c saveAllSettings() end) end; };
     { Button; text = "Set Secondary Language"; layout_width = "fill"; layout_marginBottom = "10dp"; onClick = function() showLanguagePicker(function(c, n) secondaryLangCode = c saveAllSettings() end) end; };
-    { Button; text = "Favourite Languages"; layout_width = "fill"; layout_marginBottom = "10dp"; onClick = function() showFavouritesDialog() end; };
-    { Button; text = "Digital Dictionary"; layout_width = "fill"; layout_marginBottom = "10dp"; onClick = function() showDigitalDictionary() end; };
-    { Button; text = "Punctuation Settings"; layout_width = "fill"; layout_marginBottom = "10dp"; onClick = function() showPunctuationSettingsDialog() end; };
+    { Button; text = "Digital Dictionary"; layout_width = "fill"; layout_marginBottom = "10dp"; onClick = function() showDictionaryManager() end; };
+    -- Favourite Languages button removed
+    { Button; text = "Punctuation Settings"; layout_width = "fill"; layout_marginBottom = "10dp"; onClick = function() showPunctuationDialog() end; };
     { Button; text = "AI Engine Settings"; layout_width = "fill"; layout_marginBottom = "10dp"; onClick = function() dlg.dismiss() showAISettingsDialog(dlg) end; };
     { Button; text = "Backup / Restore"; layout_width = "fill"; layout_marginBottom = "10dp"; onClick = function() showBackupRestoreDialog() end; };
-    { Button; text = "About / Contact"; layout_width = "fill"; layout_marginBottom = "10dp"; onClick = function()
-        local abt = LuaDialog(service)
-        abt.setTitle("About")
-        abt.setMessage("digital typer\nCreated by A Brothers")
-        abt.setButton("WhatsApp", function() openWhatsApp() end)
-        abt.show()
-      end;
-    };
     { Button; text = "Exit"; layout_width = "fill"; onClick = function() dlg.dismiss() end; };
   }
   local view = loadlayout(layoutTable)
@@ -1014,26 +1134,12 @@ function showMainMenu()
   dlg.show()
 end
 
-function showBackupRestoreDialog()
-  local dlg = LuaDialog(service)
-  dlg.setTitle("Backup & Restore")
-  local layout = {
-    LinearLayout; orientation = "vertical"; padding = "20dp";
-    { Button; text = "Backup Dictionary"; layout_width = "fill"; layout_marginBottom = "15dp"; onClick = function() backupDictionary() end; };
-    { Button; text = "Backup Settings"; layout_width = "fill"; layout_marginBottom = "15dp"; onClick = function() backupSettings() end; };
-    { Button; text = "Restore Dictionary"; layout_width = "fill"; layout_marginBottom = "15dp"; onClick = function() restoreDictionary() end; };
-    { Button; text = "Restore Settings"; layout_width = "fill"; layout_marginBottom = "15dp"; onClick = function() restoreSettings() end; };
-    { Button; text = "Delete Files"; layout_width = "fill"; onClick = function() showDeleteFilePicker() end; };
-  }
-  dlg.setView(loadlayout(layout))
-  dlg.show()
-end
-
 -- ============================================================
 -- Entry Point
 -- ============================================================
 loadDictionary()
 loadAllSettings()
+
 if service.getEditText() then
   if settings.showLangDialog then showTypingDialog() else startVoiceTyping(primaryLangCode) end
 else
