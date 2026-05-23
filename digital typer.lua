@@ -32,7 +32,7 @@ local settingsBackupFile = backupFolder .. "/digital_typer_settings_backup.txt"
 local changeTable = {}
 
 -- سیٹنگز
-local settings = { punctuation = "newline", showLangDialog = true, autoCorrectUrdu = false }
+local settings = { punctuation = "newline", showLangDialog = true }
 local favouriteIndices = {}
 local primaryLangCode = "en-PK"
 local secondaryLangCode = "ur-PK"
@@ -94,6 +94,7 @@ function saveGroqApiKey(key)
     groqEditor.commit()
 end
 
+-- ==================== GROQ MODEL CONFIG ====================
 function getGroqModel()
     return groqPrefs.getString("groq_model", "llama-3.3-70b-versatile")
 end
@@ -136,13 +137,12 @@ function setApiTypingEnabled(enabled)
 end
 
 -- ==================== STRICT AI INSTRUCTION ====================
-local DEFAULT_INSTRUCTION = [[You are a professional text grammar and spelling correction tool. Correct the given raw spoken text strictly according to these rules:
-1. STRICT RULE: Every single English word, regardless of how it is written in the input (even if written in Urdu script), MUST be written strictly in the English alphabet/script (e.g., "message", "thank you", "call", "audio", "hi", "ok", "a", "the", "friends"). Under no circumstances should any English word be written or transliterated into Urdu script.
-2. Keep Urdu words strictly in Urdu script. Fix any spelling issues or bad word joints in Urdu.
-3. Ensure proper spacing between words.
-4. Do NOT add any introductory text, explanation, notes, extra pleasantries, greetings, apologies, or any additional words or sentences.
-5. Do NOT add any emojis unless the user explicitly requested them.
-6. Return ONLY the exact corrected sentence text output. No extra words before or after the corrected sentence. Do not add "Corrected text:" or any similar prefix. Just the corrected sentence.]]
+local DEFAULT_INSTRUCTION = [[You are a strict speech-to-text dictation transcriber. Transcribe the spoken audio text exactly as spoken without changing the meaning, dropping words, or restructuring sentences. 
+Follow these strict rules:
+1. Output exactly what is spoken. Do NOT try to fix grammar, do NOT add punctuation marks that alter text length, and do NOT improve the sentence flow. If the input is long or redundant, keep it exactly as it is.
+2. Language Handling: Write Urdu words strictly in Urdu script. Write English words strictly in English script (e.g., "friends", "extension", "message", "audio"). 
+3. Cross-Script Correction: If an English word is spoken or phonetically transcribed in Urdu script incorrectly (like "فرینڈز" instead of "فرینڈز" or "یکسٹینشن" instead of "ایکسٹینشن"), correct its spelling within the Urdu script layout ONLY if it's meant to be kept in Urdu script, otherwise output the true English words in English alphabet.
+4. Never add any warnings, introductions, greetings, markdown blocks, explanations, prefixes like "Corrected text:", or notes. Return ONLY the transcribed text.]]
 
 -- ==================== API CALLS ====================
 function testGeminiAPI(apiKey, model, callback)
@@ -205,7 +205,7 @@ function callGroqAPI(apiKey, model, systemPrompt, userPrompt, callback)
     local messages = {}
     table.insert(messages, {role = "system", content = DEFAULT_INSTRUCTION})
     table.insert(messages, {role = "user", content = userPrompt})
-    local payload = { model = model, messages = messages, max_tokens = 1024, temperature = 0.7 }
+    local payload = { model = model, messages = messages, max_tokens = 2048, temperature = 0.3 }
     Http.post(url, cjson.encode(payload), headers, function(status, data)
         if status == 200 then
             local ok, decoded = pcall(cjson.decode, data)
@@ -221,8 +221,8 @@ end
 
 -- ==================== PROMPTS ====================
 function getGeminiPrompt(spokenText)
-    local extra = isEmojiEnabled() and " After each sentence, add ONE relevant emoji." or " Do NOT add any emojis."
-    return "Fix this spoken text keeping script languages intact (English words in English characters, Urdu in Urdu characters):" .. extra .. "\n\nInput Text: " .. spokenText
+    local extra = isEmojiEnabled() and " After each sentence, add ONE relevant emoji." or ""
+    return "Transcribe the following text verbatim. Match English to English and Urdu to Urdu text perfectly. Do not alter text or contract its size.\n\nInput Text: " .. spokenText .. extra
 end
 
 function cleanAIResponse(text)
@@ -231,10 +231,6 @@ function cleanAIResponse(text)
     text = text:gsub("^[%s]*Output:?%s*", "")
     text = text:gsub("^[%s]*Here is the corrected text:?%s*", "")
     text = text:gsub("%s*$", "")
-    if text:find("^[A-Z][a-z]+%s+") then
-        local firstSentence = text:match("^[^.]+[.]?")
-        if firstSentence then text = firstSentence end
-    end
     return text
 end
 
@@ -477,74 +473,6 @@ function showAISettingsDialog(mainDlg)
     dlg.show()
 end
 
--- ==================== AUTO CORRECT SETTINGS MENU ====================
-local isCorrectionTriggered = false
-
-function showAutoCorrectMenu()
-    local dlg = LuaDialog(service)
-    dlg.setTitle("Auto Correct Settings")
-    
-    local layout = LinearLayout(service)
-    layout.setOrientation(1)
-    layout.setPadding(30, 20, 30, 20)
-    
-    local heading = TextView(service)
-    heading.setText("Auto Correct Mode")
-    heading.setTextSize(16)
-    heading.setTextColor(0xFF4CAF50)
-    layout.addView(heading)
-    
-    local description = TextView(service)
-    description.setText("• API Typing آن ہونے پر الف مدہ اور اردو میں لکھے انگریزی الفاظ کی اصلاح خودبخود ڈکشنری میں محفوظ ہوگی۔\n• Start Correction دبانے سے اگلی دفعہ بولنے پر ان اصلاحات کا پاپ اپ دکھایا جائے گا۔")
-    description.setTextSize(13)
-    description.setTextColor(0xBBFFFFFF)
-    description.setPadding(0, 10, 0, 20)
-    layout.addView(description)
-    
-    local toggleBtn = Button(service)
-    local function updateToggleText()
-        toggleBtn.setText(settings.autoCorrectUrdu and "Auto Correct: ON" or "Auto Correct: OFF")
-        toggleBtn.setBackgroundColor(settings.autoCorrectUrdu and 0xFF4CAF50 or 0xFFF44336)
-    end
-    updateToggleText()
-    
-    toggleBtn.setOnClickListener(function()
-        settings.autoCorrectUrdu = not settings.autoCorrectUrdu
-        saveAllSettings()
-        updateToggleText()
-        if not settings.autoCorrectUrdu then 
-            isCorrectionTriggered = false 
-            service.speak("Auto Correct Disabled")
-        else
-            service.speak("Auto Correct Enabled – learning cross-script and alif madda corrections")
-        end
-    end)
-    layout.addView(toggleBtn)
-    
-    local startBtn = Button(service)
-    startBtn.setText("Start Correction (Manual Popup)")
-    startBtn.setBackgroundColor(0xFF2196F3)
-    local startParams = LinearLayout.LayoutParams(-1, -2)
-    startParams.topMargin = 15
-    startParams.bottomMargin = 15
-    startBtn.setLayoutParams(startParams)
-    
-    startBtn.setOnClickListener(function()
-        isCorrectionTriggered = true
-        service.speak("Correction process started. Now speak to see popup with corrections.")
-        dlg.dismiss()
-    end)
-    layout.addView(startBtn)
-    
-    local closeBtn = Button(service)
-    closeBtn.setText("Close")
-    closeBtn.setOnClickListener(function() dlg.dismiss() end)
-    layout.addView(closeBtn)
-    
-    dlg.setView(layout)
-    dlg.show()
-end
-
 -- ============================================================
 -- زبانیں
 -- ============================================================
@@ -740,103 +668,10 @@ function showDictionaryManager()
     LinearLayout; orientation = "vertical"; padding = "25dp";
     { Button; text = "Add Word"; layout_width = "fill"; layout_marginBottom = "15dp"; onClick = function() showAddWordDialog() end; };
     { Button; text = "View / Delete Words"; layout_width = "fill"; layout_marginBottom = "15dp"; onClick = function() showViewWordsDialog() end; };
-    { Button; text = "Auto Correct Settings"; layout_width = "fill"; layout_marginBottom = "15dp"; onClick = function() showAutoCorrectMenu() end; };
     { Button; text = "Close"; layout_width = "fill"; onClick = function() dlg.dismiss() end; };
   }
   dlg.setView(loadlayout(layout))
   dlg.show()
-end
-
--- ============================================================
--- اسمارٹ لرننگ لاجک (صرف الف مدہ اور اردو->انگلش محفوظ کریں)
--- ============================================================
-function showCorrectionPopup(count, details)
-    local messageText = "سسٹم نے کامیابی سے " .. tostring(count) .. " الفاظ درست کر کے ڈکشنری میں محفوظ کر دیے ہیں!\n\nتفصیل:\n" .. details
-    service.speak("سسٹم نے کامیابی سے " .. tostring(count) .. " الفاظ درست کر دیے ہیں") 
-    
-    local dlg = LuaDialog(service)
-    dlg.setTitle("Auto Correct Alert")
-    dlg.setMessage(messageText)
-    dlg.setButton("ٹھیک ہے", function() dlg.dismiss() end)
-    dlg.show()
-end
-
--- اسکرپٹ چیک کرنے کے مددگار فنکشن
-local function isUrduScript(s)
-    return s:match("[؀-ۿ]")  -- اردو، عربی، فارسی یونیکوڈ بلاک
-end
-
-local function isEnglishOnly(s)
-    return s:match("[A-Za-z]") and not s:match("[؀-ۿ]")
-end
-
-function learnFromAI(rawText, aiText, silent)
-  silent = silent or false
-  if not rawText or not aiText then return end
-
-  local function clean(w)
-    return (w:gsub("^[%p%s،۔?!" .. "]+", ""):gsub("[%p%s%،۔?!" .. "]+$", ""))
-  end
-
-  local rawWords = {}
-  for w in rawText:gmatch("%S+") do
-    local cw = clean(w)
-    if cw ~= "" then table.insert(rawWords, cw) end
-  end
-
-  local aiWords = {}
-  for w in aiText:gmatch("%S+") do
-    local cw = clean(w)
-    if cw ~= "" then table.insert(aiWords, cw) end
-  end
-
-  local correctedCount = 0
-  local correctionDetails = ""
-
-  -- 1. API نے جو تبدیلیاں کیں، ان میں سے صرف مخصوص حالتیں ڈکشنری میں ڈالیں
-  if rawText ~= aiText then
-    local maxLoop = math.min(#rawWords, #aiWords)
-    for i = 1, maxLoop do
-      local rw = rawWords[i]
-      local aw = aiWords[i]
-      if rw ~= aw then
-        local allow = false
-        -- الف مدہ کی اصلاح: "ا" سے شروع، "آ" نہیں، اور aw وہی لفظ جس کی پہلی "ا" کو "آ" کر دیا گیا ہو
-        if rw:find("^ا") and not rw:find("^آ") and aw == rw:gsub("^ا", "آ") then
-          allow = true
-        -- اردو رسم الخط میں لکھا انگریزی لفظ جو انگریزی حروف میں تبدیل ہوا
-        elseif isUrduScript(rw) and isEnglishOnly(aw) then
-          allow = true
-        end
-        if allow then
-          local isAdded = addToDictionary(rw, aw)
-          if isAdded then
-            correctedCount = correctedCount + 1
-            correctionDetails = correctionDetails .. rw .. " -> " .. aw .. "\n"
-          end
-        end
-      end
-    end
-  end
-
-  -- 2. الف مدہ کی اصلاح (API کی تبدیلی سے قطع نظر، ہر بار تلاش کریں)
-  for i = 1, #rawWords do
-    local word = rawWords[i]
-    if word:find("^ا") and not word:find("^آ") then
-      local correctedWord = word:gsub("^ا", "آ")
-      -- ڈپلیکیٹ چیک addToDictionary خود کر لیتا ہے
-      local isAdded = addToDictionary(word, correctedWord)
-      if isAdded then
-        correctedCount = correctedCount + 1
-        correctionDetails = correctionDetails .. word .. " -> " .. correctedWord .. "\n"
-      end
-    end
-  end
-
-  -- 3. پاپ اپ (صرف جب manual trigger دبایا گیا ہو)
-  if correctedCount > 0 and not silent then
-    showCorrectionPopup(correctedCount, correctionDetails)
-  end
 end
 
 -- ============================================================
@@ -1012,7 +847,6 @@ function loadAllSettings()
           favouriteIndices = data.favourites or {}
           settings.punctuation = data.punctuation or "newline"
           settings.showLangDialog = (data.showLangDialog == nil) and true or data.showLangDialog
-          settings.autoCorrectUrdu = data.autoCorrectUrdu or false
           
           if data.apiTypingEnabled ~= nil then
             setApiTypingEnabled(data.apiTypingEnabled)
@@ -1033,7 +867,6 @@ function saveAllSettings()
     favourites = favouriteIndices,
     punctuation = settings.punctuation,
     showLangDialog = settings.showLangDialog,
-    autoCorrectUrdu = settings.autoCorrectUrdu,
     apiTypingEnabled = isApiTypingEnabled()
   }
   local content = "return " .. dumpTable(allSettings)
@@ -1134,11 +967,6 @@ function startVoiceTyping(langCode)
         if isApiTypingEnabled() then
           processWithAI(rawText, function(aiText)
             if aiText and aiText ~= "" then
-              -- API استعمال ہونے پر ہمیشہ سیکھیں (خاموشی سے)، manual trigger ہو تو پاپ اپ دکھائیں
-              learnFromAI(rawText, aiText, not isCorrectionTriggered)
-              if isCorrectionTriggered then
-                isCorrectionTriggered = false
-              end
               local finalText = applyDictionaryReplacements(aiText)
               finalText = applyEndPunctuation(finalText)
               service.insertText(service.getEditText(), finalText)
