@@ -139,7 +139,7 @@ end
 local DEFAULT_INSTRUCTION = [[You are a professional text grammar and spelling correction tool. Correct the given raw spoken text strictly according to these rules:
 1. STRICT RULE: Every single English word, regardless of how it is written in the input (even if written in Urdu script), MUST be written strictly in the English alphabet/script (e.g., "message", "thank you", "call", "audio", "hi", "ok", "a", "the", "friends"). Under no circumstances should any English word be written or transliterated into Urdu script.
 2. Keep Urdu words strictly in Urdu script. Fix any spelling issues or bad word joints in Urdu.
-3. CRITICAL URDU RULE: You MUST use the Alif Madda (آ) character for all Urdu words that strictly start with the "aa" sound (e.g., write "آپ", "آج", "آدمی", "آسمان", "آواز", "آسان"). Do NOT write them with a simple Alif (ا).
+3. CRITICAL URDU RULE: You MUST use the Alif Madda (آ) character for all Urdu words that strictly start with the "aa" sound (e.g., write "آپ", "آج", "آدمی", "آسمان", "آواز", "آسان", "آ رہا", "آ رہی", "آ رہے"). Do NOT write them with a simple Alif (ا).
 4. Ensure proper spacing between words.
 5. Do NOT add any introductory text, explanation, notes, extra pleasantries, greetings, apologies, or any additional words or sentences.
 6. Do NOT add any emojis unless the user explicitly requested them.
@@ -221,7 +221,7 @@ end
 
 function getGeminiPrompt(spokenText)
     local extra = isEmojiEnabled() and " After each sentence, add ONE relevant emoji." or " Do NOT add any emojis."
-    return "Fix this spoken text keeping script languages intact (English words in English characters, Urdu in Urdu characters). Make sure words like aap, aaj, aadmi, aasman use Alif Madda (آ):" .. extra .. "\n\nInput Text: " .. spokenText
+    return "Fix this spoken text keeping script languages intact (English words in English characters, Urdu in Urdu characters). Make sure words like aap, aaj, aadmi, aasman, aa raha, aa rahi use Alif Madda (آ):" .. extra .. "\n\nInput Text: " .. spokenText
 end
 
 function cleanAIResponse(text)
@@ -475,7 +475,7 @@ function showAISettingsDialog(mainDlg)
     dlg.show()
 end
 
--- ==================== AUTO CORRECT SETTINGS MENU (ABOUT UPDATED) ====================
+-- ==================== AUTO CORRECT SETTINGS MENU ====================
 function showAutoCorrectMenu(returnDlg)
     local dlg = LuaDialog(service)
     dlg.setTitle("Auto Correct Settings")
@@ -527,29 +527,11 @@ function showAutoCorrectMenu(returnDlg)
     startBtn.setOnClickListener(function()
         if not settings.autoCorrectUrdu then
             service.speak("Your Auto Correct button is OFF. Please turn it ON from the button above before starting correction.")
-            local alertDlg = LuaDialog(service)
-            alertDlg.setTitle("Alert")
-            alertDlg.setMessage("Your Auto Correct button is OFF. Please turn it ON from the button above before starting correction.")
-            alertDlg.setButton("OK", function() alertDlg.dismiss() end)
-            alertDlg.show()
             return
         end
         
         if isApiTypingEnabled() then
             service.speak("Please disable Typing with API first, then proceed with correction.")
-            
-            local apiAlertDlg = LuaDialog(service)
-            apiAlertDlg.setTitle("API Typing Warning")
-            apiAlertDlg.setMessage("Before correcting words, you must turn OFF Typing with API. Please go to settings and disable it.")
-            
-            apiAlertDlg.setButton("Go to AI Engine Settings", function()
-                apiAlertDlg.dismiss()
-                dlg.dismiss() 
-                showAISettingsDialog(dlg) 
-            end)
-            
-            apiAlertDlg.setButton2("OK", function() apiAlertDlg.dismiss() end)
-            apiAlertDlg.show()
             return
         end
         
@@ -572,7 +554,7 @@ function showAutoCorrectMenu(returnDlg)
 end
 
 -- ============================================================
--- درست جوڑوں کی میچنگ اور مینوئل تصحیح لاجک (Strict Pair Matching)
+-- درست جوڑوں کی میچنگ اور مینوئل تصحیح لاجک
 -- ============================================================
 function processDictionaryAutoCorrection()
   local pairsToFix = {}
@@ -583,7 +565,6 @@ function processDictionaryAutoCorrection()
   end
 
   if #pairsToFix == 0 then
-    showCorrectionPopup(0, "No Urdu script words found in the dictionary.")
     return
   end
 
@@ -594,10 +575,7 @@ function processDictionaryAutoCorrection()
   local promptText = table.concat(wrongWordsList, " ")
 
   local function processAIResult(resultText)
-      if not resultText or resultText == "" then
-        showCorrectionPopup(0, "No results could be obtained from correction.")
-        return
-      end
+      if not resultText or resultText == "" then return end
 
       local fixedWords = {}
       for w in resultText:gmatch("%S+") do
@@ -605,7 +583,6 @@ function processDictionaryAutoCorrection()
       end
 
       local correctedCount = 0
-      local correctionDetails = ""
       local newChangeTable = {}
 
       for k, v in pairs(changeTable) do
@@ -621,43 +598,31 @@ function processDictionaryAutoCorrection()
         if oldWrongUrdu ~= newCorrectUrdu and newCorrectUrdu:match("[\216-\219]") then
           newChangeTable[oldWrongUrdu] = nil
           newChangeTable[newCorrectUrdu] = associatedEnglish
-          
           correctedCount = correctedCount + 1
-          correctionDetails = correctionDetails .. oldWrongUrdu .. " -> " .. newCorrectUrdu .. " (" .. associatedEnglish .. ")\n"
         end
       end
 
       if correctedCount > 0 then
         changeTable = newChangeTable
         saveDictionary()
-        showCorrectionPopup(correctedCount, correctionDetails)
-      else
-        showCorrectionPopup(0, "All Urdu words in the dictionary are already written in the correct script.")
+        service.speak("Dictionary corrected successfully")
       end
   end
 
   local engine = getSelectedAIEngine()
   if engine == "groq" then
     local apiKey = getGroqApiKey()
-    if not apiKey or apiKey == "" then
-        service.speak("Please set Groq API key in AI settings first")
-        return
-    end
+    if not apiKey or apiKey == "" then return end
     local model = getGroqModel()
     callGroqAPI(apiKey, model, DICTIONARY_CORRECTION_INSTRUCTION, promptText, function(result, error)
-        if error then showErrorPopup(error)
-        else processAIResult(cleanAIResponse(result)) end
+        if not error then processAIResult(cleanAIResponse(result)) end
     end)
   else
     local apiKey = getGeminiApiKey()
-    if not apiKey or apiKey == "" then
-        service.speak("Please set Gemini API key in AI settings first")
-        return
-    end
+    if not apiKey or apiKey == "" then return end
     local model = getGeminiModel()
     callGeminiAPI(apiKey, model, promptText, DICTIONARY_CORRECTION_INSTRUCTION, function(result, error)
-        if error then showErrorPopup(error)
-        else processAIResult(cleanAIResponse(result)) end
+        if not error then processAIResult(cleanAIResponse(result)) end
     end)
   end
 end
@@ -760,6 +725,8 @@ function addAlifMaddaWords()
     ["اپ"] = "آپ", ["اج"] = "آج", ["انا"] = "آنا", ["ادمی"] = "آدمی",
     ["اسمان"] = "آسمان", ["اگ"] = "آگ", ["اٹا"] = "آٹا", ["استان"] = "آستان",
     ["اہ"] = "آہ", ["ارام"] = "آرام", ["azma"] = "آزما", ["باد"] = "آباد",
+    ["ارہی"] = "آرہی", ["ارہا"] = "آرہا", ["ارہے"] = "آرہے", ["ارہے"] = "آرہے", ["ارھے"] = "آرہے",
+    ["ا رہی"] = "آ رہی", ["ا رہا"] = "آ رہا", ["ا رہے"] = "آ رہے", ["ا رھے"] = "آ رہے"
   }
   for wrong, correct in pairs(alifMaddaMap) do
     if not changeTable[wrong] then
@@ -823,7 +790,7 @@ function applyDictionaryReplacements(text)
   local result = text
   for wrong, correct in pairs(changeTable) do
     if wrong and wrong ~= "" and correct and correct ~= "" then
-      local pattern = "%f[%a%d\128-\255]" .. escapePattern(wrong) .. "%f[%s%p\0]"
+      local pattern = "%f[^%s%p]" .. escapePattern(wrong) .. "%f[%s%p\0]"
       local ok, replaced = pcall(function() return result:gsub(pattern, correct) end)
       if ok then result = replaced else
         local patternSimple = escapePattern(wrong)
@@ -848,26 +815,51 @@ function showDictionaryManager()
   dlg.show()
 end
 
-function showCorrectionPopup(count, details)
-    local messageText = "System successfully corrected " .. tostring(count) .. " words!\n\nDetails:\n" .. details
-    service.speak("System successfully corrected " .. tostring(count) .. " words") 
-    
-    local dlg = LuaDialog(service)
-    dlg.setTitle("Auto Correct Alert")
-    dlg.setMessage(messageText)
-    dlg.setButton("OK", function() dlg.dismiss() end)
-    dlg.show()
+-- ============================================================
+-- صوتی مماثلت کا فنکشن (سپورٹ کے لیے)
+-- ============================================================
+function checkPhoneticMatch(uWord, eWord)
+  if not uWord or not eWord or uWord == "" or eWord == "" then return false end
+  local uFirst = uWord:match("^([\216-\219][\128-\191])")
+  if not uFirst then return false end
+  local eFirst = eWord:sub(1,1):lower()
+  
+  local uToE = {
+    ["و"] = {w = true, v = true, o = true, u = true},
+    ["ٹ"] = {t = true}, ["ت"] = {t = true}, ["ط"] = {t = true},
+    ["ک"] = {k = true, c = true, q = true}, ["گ"] = {g = true},
+    ["م"] = {m = true}, ["ف"] = {f = true, p = true},
+    ["ب"] = {b = true}, ["پ"] = {p = true},
+    ["ڈ"] = {d = true}, ["د"] = {d = true}, ["ر"] = {r = true},
+    ["ل"] = {l = true}, ["ن"] = {n = true}, ["ہ"] = {h = true}, ["ح"] = {h = true},
+    ["ج"] = {j = true, g = true}, ["چ"] = {c = true},
+    ["س"] = {s = true, c = true}, ["ص"] = {s = true}, ["ث"] = {s = true}, ["ش"] = {s = true},
+    ["ز"] = {z = true}, ["ذ"] = {z = true}, ["ض"] = {z = true}, ["ظ"] = {z = true},
+    ["ی"] = {y = true, e = true, i = true},
+    ["ا"] = {a = true, e = true, i = true, o = true, u = true},
+    ["آ"] = {a = true, e = true, i = true, o = true, u = true},
+  }
+  if uToE[uFirst] and uToE[uFirst][eFirst] then return true end
+  return false
 end
 
 -- ============================================================
--- لرننگ لاجک (فکسڈ: ڈپلیکیشن اور الف مدہ کے سٹرکٹ رولز کے ساتھ)
+-- فکسڈ لرننگ لاجک (اینکرز اور سمارٹ پوزیشن الائنمنٹ کے ساتھ)
 -- ============================================================
 function learnFromAI(rawText, aiText, silent)
   silent = true 
   if not rawText or not aiText then return end
 
   local function clean(w)
-    return (w:gsub("^[%p%s،۔?!" .. "]+", ""):gsub("[%p%s%،۔?!" .. "]+$", ""))
+    if not w then return "" end
+    local last_w
+    repeat
+      last_w = w
+      w = w:gsub("^[%p%s]", ""):gsub("[%p%s]$", "")
+      w = w:gsub("^۔", ""):gsub("^،", "")
+      w = w:gsub("۔$", ""):gsub("،$", "")
+    until w == last_w
+    return w
   end
 
   local rawWords = {}
@@ -882,13 +874,56 @@ function learnFromAI(rawText, aiText, silent)
     if cw ~= "" then table.insert(aiWords, cw) end
   end
 
-  local maxLoop = math.min(#rawWords, #aiWords)
-  for i = 1, maxLoop do
-    local rw = rawWords[i]
-    local aw = aiWords[i]
-    if rw ~= aw then
-      if changeTable[rw] ~= aw then
-        addToDictionary(rw, aw)
+  if #rawWords == 0 or #aiWords == 0 then return end
+
+  local rawAnchored = {}
+  local aiAnchored = {}
+  
+  for i = 1, #rawWords do
+    for j = 1, #aiWords do
+      if not aiAnchored[j] and rawWords[i] == aiWords[j] then
+        if math.abs(i - j) <= 3 then
+          rawAnchored[i] = j
+          aiAnchored[j] = i
+          break
+        end
+      end
+    end
+  end
+
+  for i = 1, #rawWords do
+    if not rawAnchored[i] then
+      local rw = rawWords[i]
+      local bestJ = nil
+      local minDistance = 999
+      
+      local startLook = math.max(1, i - 2)
+      local endLook = math.min(#aiWords, i + 2)
+      
+      for j = startLook, endLook do
+        if not aiAnchored[j] then
+          local aw = aiWords[j]
+          if checkPhoneticMatch(rw, aw) then
+            bestJ = j
+            break
+          end
+          local dist = math.abs(i - j)
+          if dist < minDistance then
+            minDistance = dist
+            bestJ = j
+          end
+        end
+      end
+      
+      if bestJ then
+        local aw = aiWords[bestJ]
+        if rw ~= aw and not (rw:match("^[a-zA-Z]+$") and aw:match("^[a-zA-Z]+$")) then
+          if changeTable[rw] ~= aw then
+            addToDictionary(rw, aw)
+          end
+          aiAnchored[bestJ] = i
+          rawAnchored[i] = bestJ
+        end
       end
     end
   end
@@ -898,9 +933,10 @@ function learnFromAI(rawText, aiText, silent)
     ["اسمان"] = "آسمان", ["اگ"] = "آگ", ["اٹا"] = "آٹا", ["استان"] = "آستان",
     ["اہ"] = "آہ", ["ارام"] = "آرام", ["اباد"] = "آباد", ["افت"] = "آفت",
     ["انسو"] = "آنسو", ["اخری"] = "آخری", ["واز"] = "آواز", ["انکھیں"] = "آنکھیں",
-    ["اداب"] = "آداب", ["اسان"] = "آسان", ["ام"] = "آام", ["ایت"] = "آیت"
+    ["اداب"] = "آداب", ["اسان"] = "آسان", ["ام"] = "آام", ["ایت"] = "آیت",
+    ["ارہی"] = "آرہی", ["ارہا"] = "آرہا", ["ارہے"] = "آرہے", ["ارہے"] = "آرہے", ["ارھے"] = "آرہے",
+    ["ا رہی"] = "آ رہی", ["ا رہا"] = "آ رہا", ["ا رہے"] = "آ رہے", ["ا رھے"] = "آ رہے"
   }
-
   for i = 1, #rawWords do
     local word = rawWords[i]
     if alifMaddaWords[word] then
@@ -912,11 +948,12 @@ function learnFromAI(rawText, aiText, silent)
 end
 
 -- ============================================================
--- ایڈ اور ویو ورڈز ڈائیلاگ
+-- ایڈ اور ویو ورڈز ڈائیلاگ (آئی ڈی فکسڈ برائے سیونگ)
 -- ============================================================
 function showAddWordDialog()
   local dlg = LuaDialog(service)
   dlg.setTitle("Add Word Replacement")
+  local views = {}
   local layout = {
     LinearLayout; orientation = "vertical"; padding = "20dp";
     { TextView; text = "Wrong Word Spoken:"; };
@@ -925,8 +962,8 @@ function showAddWordDialog()
     { EditText; id = "correctInput"; layout_width = "fill"; layout_marginBottom = "20dp"; };
     { LinearLayout; orientation = "horizontal"; layout_width = "fill";
       { Button; text = "Save"; layout_width = "0dp"; layout_weight = 1; onClick = function()
-          local w = string.match(wrongInput.getText().toString(), "^%s*(.-)%s*$")
-          local c = string.match(correctInput.getText().toString(), "^%s*(.-)%s*$")
+          local w = string.match(views.wrongInput.getText().toString(), "^%s*(.-)%s*$")
+          local c = string.match(views.correctInput.getText().toString(), "^%s*(.-)%s*$")
           if w ~= "" and c ~= "" then
             if addToDictionary(w, c) then
               service.speak("Saved successfully")
@@ -942,7 +979,7 @@ function showAddWordDialog()
       { Button; text = "Cancel"; layout_width = "0dp"; layout_weight = 1; onClick = function() dlg.dismiss() end; };
     };
   }
-  dlg.setView(loadlayout(layout))
+  dlg.setView(loadlayout(layout, views))
   dlg.show()
 end
 
@@ -976,7 +1013,6 @@ function showViewWordsDialog()
       deleteFromDictionary(selectedKey)
       service.speak("Deleted")
       askDlg.dismiss()
-      
       adapter.clear()
       adapter.notifyDataSetChanged()
       dlg.dismiss() 
@@ -994,7 +1030,6 @@ function showViewWordsDialog()
       clearAllDictionary()
       service.speak("Dictionary cleared completely")
       confirmDlg.dismiss()
-      
       adapter.clear()
       adapter.notifyDataSetChanged()
       dlg.dismiss() 
@@ -1020,7 +1055,7 @@ function showLanguagePicker(callback)
   local dlg = LuaDialog(service)
   dlg.setTitle("Select Language")
   local list = ListView(service)
-  local adapter = ArrayAdapter(service, android.R.layout.simple_list_item_1, languageItems)
+  local adapter = ArrayAdapter(service, android.R.layout.simple_spinner_item, languageItems)
   list.setAdapter(adapter)
   list.setOnItemClickListener(function(parent, view, position, id)
     local selectedCode = languageCodes[position+1]
@@ -1082,7 +1117,6 @@ function loadAllSettings()
           settings.punctuation = data.punctuation or "newline"
           settings.showLangDialog = (data.showLangDialog == nil) and true or data.showLangDialog
           settings.autoCorrectUrdu = data.autoCorrectUrdu or false
-          
           if data.apiTypingEnabled ~= nil then
             setApiTypingEnabled(data.apiTypingEnabled)
           end
@@ -1130,17 +1164,12 @@ end
 function showPunctuationDialog()
     local dlg = LuaDialog(service)
     dlg.setTitle("Punctuation Settings")
-    
     local options = {"None", "Dot Only (.)", "Space Only ( )", "New Line (\\n)"}
     local codes = {"none", "dot_only", "space_only", "newline"}
-    
     local currentCode = settings.punctuation or "newline"
     local currentIndex = 0
     for i, code in ipairs(codes) do
-        if code == currentCode then
-            currentIndex = i - 1
-            break
-        end
+        if code == currentCode then currentIndex = i - 1 break end
     end
     
     local spinner = Spinner(service)
@@ -1184,7 +1213,7 @@ function showPunctuationDialog()
 end
 
 -- ============================================================
--- وائس ٹائپنگ لاجک (فکسڈ: الف مدہ کو ہر صورت تبدیل کرے گی)
+-- وائس ٹائپنگ لاجک
 -- ============================================================
 function startVoiceTyping(langCode)
   local speechRec = SpeechRecognizer.createSpeechRecognizer(service.getApplicationContext())
@@ -1196,18 +1225,21 @@ function startVoiceTyping(langCode)
         
         local function fallback(textToUse)
           local finalText = textToUse or rawText
-          learnFromAI(rawText, finalText, true)
+          if langCode ~= secondaryLangCode then
+            learnFromAI(rawText, finalText, true)
+          end
           
-          -- ڈکشنری متبادلات لاگو کرنے سے پہلے ایک بار زبردستی الف مدہ چیک کریں
           local alifMaddaMap = {
             ["اپ"] = "آپ", ["اج"] = "آج", ["انا"] = "آنا", ["ادمی"] = "آدمی",
             ["اسمان"] = "آسمان", ["اگ"] = "آگ", ["اٹا"] = "آٹا", ["استان"] = "آستان",
             ["اہ"] = "آہ", ["ارام"] = "آرام", ["اباد"] = "آباد", ["افت"] = "آفت",
             ["انسو"] = "آنسو", ["اخری"] = "آخری", ["واز"] = "آواز", ["انکھیں"] = "آنکھیں",
-            ["اداب"] = "آداب", ["اسان"] = "آسان", ["ام"] = "آام", ["ایت"] = "آیت"
+            ["اداب"] = "آداب", ["اسان"] = "آسان", ["ام"] = "آام", ["ایت"] = "آیت",
+            ["ارہی"] = "آرہی", ["ارہا"] = "آرہا", ["ارہے"] = "آرہے", ["ارہے"] = "آرہے", ["ارھے"] = "آرہے",
+            ["ا رہی"] = "آ رہی", ["ا رہا"] = "آ رہا", ["ا رہے"] = "آ رہے", ["ا رھے"] = "آ رہے"
           }
           for wrong, correct in pairs(alifMaddaMap) do
-             finalText = finalText:gsub("%f[%a%d\128-\255]" .. escapePattern(wrong) .. "%f[%s%p\0]", correct)
+             finalText = finalText:gsub("%f[^%s%p]" .. escapePattern(wrong) .. "%f[%s%p\0]", correct)
           end
           
           finalText = applyDictionaryReplacements(finalText)
@@ -1219,18 +1251,21 @@ function startVoiceTyping(langCode)
         if isApiTypingEnabled() then
           processWithAI(rawText, function(aiText)
             if aiText and aiText ~= "" then
-              learnFromAI(rawText, aiText, true)
+              if langCode ~= secondaryLangCode then
+                learnFromAI(rawText, aiText, true)
+              end
               
-              -- اے پی آئی رسپانس پر بھی الف مدہ رولز کو زبردستی لاگو کریں
               local alifMaddaMap = {
                 ["اپ"] = "آپ", ["اج"] = "آج", ["انا"] = "آنا", ["ادمی"] = "آدمی",
                 ["اسمان"] = "آسمان", ["اگ"] = "آگ", ["اٹا"] = "آٹا", ["استان"] = "آستان",
                 ["اہ"] = "آہ", ["ارام"] = "آرام", ["اباد"] = "آباد", ["افت"] = "آفت",
                 ["انسو"] = "آنسو", ["اخری"] = "آخری", ["واز"] = "آواز", ["انکھیں"] = "آنکھیں",
-                ["اداب"] = "آداب", ["اسان"] = "آسان", ["ام"] = "آام", ["ایت"] = "آیت"
+                ["اداب"] = "آداب", ["اسان"] = "آسان", ["ام"] = "آام", ["ایت"] = "آیت",
+                ["ارہی"] = "آرہی", ["ارہا"] = "آرہا", ["ارہے"] = "آرہے", ["ارہے"] = "آرہے", ["ارھے"] = "آرہے",
+                ["ا رہی"] = "آ رہی", ["ا رہا"] = "آ رہا", ["ا رہے"] = "آ رہے", ["ا rھے"] = "آ رہے"
               }
               for wrong, correct in pairs(alifMaddaMap) do
-                 aiText = aiText:gsub("%f[%a%d\128-\255]" .. escapePattern(wrong) .. "%f[%s%p\0]", correct)
+                 aiText = aiText:gsub("%f[^%s%p]" .. escapePattern(wrong) .. "%f[%s%p\0]", correct)
               end
               
               local finalText = applyDictionaryReplacements(aiText)
@@ -1259,17 +1294,14 @@ end
 function checkAutoCorrectAndProceed(langCode, currentDlg)
     if settings.autoCorrectUrdu then
         service.speak("Auto Correct is enabled. Please disable it before typing.")
-        
         local alert = LuaDialog(service)
         alert.setTitle("Auto Correct Warning")
         alert.setMessage("Voice Typing cannot start while Auto Correct is ON. Please go to settings and turn it OFF.")
-        
         alert.setButton("Go to Auto Correct Settings", function()
             alert.dismiss()
             currentDlg.dismiss()
             showAutoCorrectMenu(currentDlg)
         end)
-        
         alert.setButton2("Cancel", function() alert.dismiss() end)
         alert.show()
     else
@@ -1300,9 +1332,13 @@ function showTypingDialog()
   dlg.show()
 end
 
+-- ============================================================
+-- مین مینو (آئی ڈی فکسڈ)
+-- ============================================================
 function showMainMenu()
   local dlg = LuaDialog()
   dlg.setTitle("digital typer")
+  local views = {}
   local layoutTable = {
     LinearLayout; orientation = "vertical"; padding = "30dp";
     { Button; id = "toggleBtn"; layout_width = "fill"; layout_marginBottom = "10dp"; };
@@ -1314,9 +1350,9 @@ function showMainMenu()
     { Button; text = "Backup / Restore"; layout_width = "fill"; layout_marginBottom = "10dp"; onClick = function() showBackupRestoreDialog() end; };
     { Button; text = "Exit"; layout_width = "fill"; onClick = function() dlg.dismiss() end; };
   }
-  local view = loadlayout(layoutTable)
-  local function updateUI() toggleBtn.setText(settings.showLangDialog and "Show dialog: ON" or "Show dialog: OFF") end
-  toggleBtn.onClick = function() settings.showLangDialog = not settings.showLangDialog saveAllSettings() updateUI() end
+  local view = loadlayout(layoutTable, views)
+  local function updateUI() views.toggleBtn.setText(settings.showLangDialog and "Show dialog: ON" or "Show dialog: OFF") end
+  views.toggleBtn.onClick = function() settings.showLangDialog = not settings.showLangDialog saveAllSettings() updateUI() end
   updateUI()
   dlg.setView(view)
   dlg.show()
