@@ -6,30 +6,19 @@ import "android.speech.RecognitionListener"
 import "android.speech.RecognizerIntent"
 import "android.content.Context"
 import "java.io.File"
-import "java.io.FileInputStream"
-import "java.io.FileOutputStream"
 import "android.os.Environment"
-import "com.androlua.Http"
-import "cjson"
 
 -- ============================================================
--- فائل راستے
+-- فائل راستے (صرف سیٹنگز سیو کرنے کے لیے)
 -- ============================================================
 local backupFolder = os.getenv("EXTERNAL_STORAGE") .. "/解说/Plugins/digital typer/backup"
-local dictFile = backupFolder .. "/dictionary.txt"
 local settingsFile = backupFolder .. "/digital_typer_settings.txt"
-local offline100kDictFile = backupFolder .. "/alif_madda_100k.txt"
-
-local changeTable = {}
-local offlineAlifMaddaTable = {}
-local MAX_DICT_LIMIT = 100000 -- 1 لاکھ الفاظ کی لمٹ سیٹ کر دی گئی ہے
 
 -- سیٹنگز
 local settings = { 
     punctuation = "newline", 
     showLangDialog = true, 
-    autoCorrectUrdu = false,
-    offlineModeEnabled = false -- نیا آپشن: Use without internet (By default OFF)
+    offlineModeEnabled = false -- (By default OFF)
 }
 local primaryLangCode = "ur-PK"
 local secondaryLangCode = "en-PK"
@@ -40,100 +29,67 @@ function ensureBackupFolder()
 end
 
 -- ============================================================
--- 1 لاکھ الفاظ کی سپورٹ کے ساتھ آف لائن بیس ڈکشنری
+-- 100% ایکوریٹ بلٹ اِن ڈکشنری (کوڈ کے اندر ہی)
 -- ============================================================
-function createBaseOfflineDictionary()
-    ensureBackupFolder()
-    -- یہاں وہ الفاظ ہیں جو گوگل سپیچ غلط سنتا ہے اور انہیں الف مدہ کی ضرورت ہوتی ہے
-    local baseWords = {
-        ["اپ"] = "آپ", ["اج"] = "آج", ["انا"] = "آنا", ["ادمی"] = "آدمی",
-        ["اسمان"] = "آسمان", ["اگ"] = "آگ", ["اٹا"] = "آٹا", ["استان"] = "آستان",
-        ["اہ"] = "آہ", ["ارام"] = "آرام", ["اباد"] = "آباد", ["افت"] = "آفت",
-        ["انسو"] = "آنسو", ["اخری"] = "آخری", ["واز"] = "آواز", ["انکھیں"] = "آنکھیں",
-        ["اداب"] = "آداب", ["اسان"] = "آسان", ["آم"] = "آم", ["ایت"] = "آیت",
-        ["ارہی"] = "آرہی", ["ارہا"] = "آرہا", ["ارہے"] = "آرہے", ["ارھے"] = "آرہے",
-        ["ا رہی"] = "آ رہی", ["ا رہا"] = "آ رہا", ["ا رہے"] = "آ رہے",
-        ["ازاد"] = "آزاد", ["ازادی"] = "آزادی", ["اسپاس"] = "آس پاس",
-        ["ایندہ"] = "آئندہ", ["اغاز"] = "آغاز", ["ابادی"] = "آبادی", 
-        ["الو"] = "آلو", ["امدن"] = "آمدن", ["امدی"] = "آمدی", 
-        ["اڑو"] = "آڑو", ["اری"] = "آری", ["اہستہ"] = "آہستہ", 
-        ["اخر"] = "آخر", ["ادھا"] = "آدھا", ["ادھے"] = "آدھے", ["ادھی"] = "آدھی",
-        ["اشنا"] = "آشنا", ["اغوش"] = "آغوش", ["الہ"] = "آلہ", 
-        ["اموز"] = "آموز", ["انچ"] = "آنچ", ["اندھی"] = "آندھی", 
-        ["انگن"] = "آنگن", ["اہٹ"] = "آہٹ", ["ائینہ"] = "آئینہ", ["اخرکار"] = "آخرکار",
-        ["ابشار"] = "آبشار", ["ابرو"] = "آبرو", ["ازمانا"] = "آزمانا", ["ازمائش"] = "آزمائش",
-        ["اسرہ"] = "آسرہ", ["اسودہ"] = "آسودہ", ["اغیار"] = "آغیار", ["الودہ"] = "آلودہ",
-        ["امنے"] = "آمنے", ["اوارہ"] = "آوارہ", ["اہن"] = "آہن", ["ایات"] = "آیات",
-        ["امادہ"] = "آمادہ", ["اراستہ"] = "آراستہ", ["ازردہ"] = "آزردہ", ["اسیہ"] = "آسیہ"
-    }
-    -- نوٹ: یہ سمارٹ انجن "اپنے", "اپنا", "امید", "اچھا", "اس" کو نہیں چھیڑے گا 
-    -- کیونکہ وہ الفاظ کی مکمل باؤنڈری سے میچ نہیں کرتے۔ 
-    
-    local f = io.open(offline100kDictFile, "w")
-    if f then
-        for wrong, correct in pairs(baseWords) do
-            f:write(wrong .. "=" .. correct .. "\n")
-        end
-        f:close()
-    end
-    return baseWords
-end
-
-function loadOffline100kDictionary()
-    local f = io.open(offline100kDictFile, "r")
-    offlineAlifMaddaTable = {}
-    local count = 0
-    
-    if f then
-        for line in f:lines() do
-            if count >= MAX_DICT_LIMIT then break end
-            local wrong, correct = line:match("^([^=]+)=([^=]+)$")
-            if wrong and correct then
-                offlineAlifMaddaTable[wrong:match("^%s*(.-)%s*$")] = correct:match("^%s*(.-)%s*$")
-                count = count + 1
-            end
-        end
-        f:close()
-    else
-        offlineAlifMaddaTable = createBaseOfflineDictionary()
-    end
-end
+-- یہ وہ لسٹ ہے جو بغیر انٹرنیٹ کے کام کرے گی۔ "اپنے"، "اپنا"، "امید" اس میں نہیں ہیں تاکہ وہ الف سے ہی لکھے جائیں۔
+local offlineAlifMaddaTable = {
+    ["اپ"] = "آپ", ["اج"] = "آج", ["انا"] = "آنا", ["ادمی"] = "آدمی",
+    ["اسمان"] = "آسمان", ["اگ"] = "آگ", ["اٹا"] = "آٹا", ["استان"] = "آستان",
+    ["اہ"] = "آہ", ["ارام"] = "آرام", ["اباد"] = "آباد", ["افت"] = "آفت",
+    ["انسو"] = "آنسو", ["اخری"] = "آخری", ["اواز"] = "آواز", ["انکھیں"] = "آنکھیں",
+    ["انکھ"] = "آنکھ", ["اداب"] = "آداب", ["اسان"] = "آسان", ["ام"] = "آم", 
+    ["ایت"] = "آیت", ["ارہی"] = "آرہی", ["ارہا"] = "آرہا", ["ارہے"] = "آرہے", 
+    ["ارھے"] = "آرہے", ["ا رہی"] = "آ رہی", ["ا رہا"] = "آ رہا", ["ا رہے"] = "آ رہے",
+    ["ازاد"] = "آزاد", ["ازادی"] = "آزادی", ["اسپاس"] = "آس پاس", ["ایندہ"] = "آئندہ", 
+    ["اغاز"] = "آغاز", ["ابادی"] = "آبادی", ["الو"] = "آلو", ["امدن"] = "آمدن", 
+    ["امدی"] = "آمدی", ["اڑو"] = "آڑو", ["اری"] = "آری", ["اہستہ"] = "آہستہ", 
+    ["اخر"] = "آخر", ["ادھا"] = "آدھا", ["ادھے"] = "آدھے", ["ادھی"] = "آدھی",
+    ["اشنا"] = "آشنا", ["اغوش"] = "آغوش", ["الہ"] = "آلہ", ["اموز"] = "آموز", 
+    ["انچ"] = "آنچ", ["اندھی"] = "آندھی", ["انگن"] = "آنگن", ["اہٹ"] = "آہٹ", 
+    ["ائینہ"] = "آئینہ", ["اخرکار"] = "آخرکار", ["ابشار"] = "آبشار", ["ابرو"] = "آبرو", 
+    ["ازمانا"] = "آزمانا", ["ازمائش"] = "آزمائش", ["اسرہ"] = "آسرہ", ["اسودہ"] = "آسودہ", 
+    ["اغیار"] = "آغیار", ["الودہ"] = "آلودہ", ["امنے"] = "آمنے", ["اوارہ"] = "آوارہ", 
+    ["اہن"] = "آہن", ["ایات"] = "آیات", ["امادہ"] = "آمادہ", ["اراستہ"] = "آراستہ", 
+    ["ازردہ"] = "آزردہ", ["اسیہ"] = "آسیہ", ["اثار"] = "آثار", ["ادھ"] = "آدھ", 
+    ["افات"] = "آفات", ["اقا"] = "آقا", ["الات"] = "آلات", ["امیز"] = "آمیز", 
+    ["اواگون"] = "آواگون", ["اویزاں"] = "آویزاں", ["استین"] = "آستین", ["اسیب"] = "آسیب"
+}
 
 -- ============================================================
--- SMART CONTEXTUAL ENGINE (آف لائن پروسیسنگ)
+-- SUPER ACCURATE OFFLINE ENGINE (Space Padding Algorithm)
 -- ============================================================
 function processOfflineUrduText(rawText)
-    -- اگر آف لائن پروسیسنگ آپشن OFF ہے، تو جو بولا گیا ہے وہی واپس کر دو
+    -- اگر آف لائن پروسیسنگ آپشن OFF ہے، تو بغیر کسی تبدیلی کے اصل ٹیکسٹ واپس کر دیں
     if not settings.offlineModeEnabled then 
         return rawText 
     end
     
     if not rawText or rawText == "" then return rawText end
     
-    local result = ""
-    local lastPos = 1
+    local text = rawText
     
-    -- یہ لوپ ہر لفظ کو الگ کرتا ہے۔ 
-    -- اس کا فائدہ یہ ہے کہ جب آپ "اپنا" بولیں گے، تو یہ اسے ایک مکمل لفظ مانے گا اور 
-    -- "اپ" کی ڈکشنری اس پر اپلائی نہیں ہوگی۔ اس طرح الف اور الف مدہ میں فرق رہے گا۔
-    for word in rawText:gmatch("[^%s%p۔،؟]+") do
-        local startPos, endPos = rawText:find(word, lastPos, true)
-        if startPos then
-            result = result .. rawText:sub(lastPos, startPos - 1)
-            
-            if offlineAlifMaddaTable[word] then
-                result = result .. offlineAlifMaddaTable[word]
-            elseif changeTable[word] then
-                result = result .. changeTable[word]
-            else
-                result = result .. word
-            end
-            
-            lastPos = endPos + 1
-        end
+    -- سٹیپ 1: رموزِ اوقاف (Punctuation) کے ارد گرد اسپیس دیں تاکہ وہ الفاظ کے ساتھ نہ جڑیں
+    text = text:gsub("([۔،؟!.])", " %1 ")
+    
+    -- سٹیپ 2: پورے ٹیکسٹ کے شروع اور آخر میں اسپیس لگائیں (Boundary Protection)
+    text = " " .. text .. " "
+    
+    -- سٹیپ 3: ڈکشنری چیک کر کے پرفیکٹ ورڈ ریپلیسمنٹ
+    for wrong, correct in pairs(offlineAlifMaddaTable) do
+        local pattern = "%s" .. wrong .. "%s"
+        local replacement = " " .. correct .. " "
+        
+        -- دو بار رن کیا گیا ہے تاکہ اگر دو غلط الفاظ ساتھ ساتھ ہوں تو مس نہ ہوں
+        text = text:gsub(pattern, replacement)
+        text = text:gsub(pattern, replacement) 
     end
-    result = result .. rawText:sub(lastPos)
-    return result
+    
+    -- سٹیپ 4: فالتو اسپیس ختم کریں اور کلین کریں
+    text = text:gsub("%s+", " ") -- ایک سے زیادہ اسپیس کو ایک کر دے گا
+    text = text:gsub(" ([۔،؟!.])", "%1") -- پنکچویشن سے پہلے والی اسپیس ہٹا دے گا
+    text = text:match("^%s*(.-)%s*$") -- شروع اور آخر کی اسپیس ختم
+    
+    return text
 end
 
 -- ============================================================
@@ -194,7 +150,7 @@ function startVoiceTyping(langCode)
       if res and res.size() > 0 then
         local rawText = res.get(0)
         
-        -- سمارٹ آف لائن انجن کال ہو رہا ہے (یہ سیٹنگ کے لحاظ سے فیصلہ کرے گا)
+        -- ہمارا نیا سمارٹ آف لائن انجن کال ہو رہا ہے
         local finalText = processOfflineUrduText(rawText)
         finalText = applyEndPunctuation(finalText)
         
@@ -246,11 +202,11 @@ function showMainMenu()
       views.dialogToggleBtn.setText(settings.showLangDialog and "Show Language Dialog: ON" or "Show Language Dialog: OFF") 
       views.offlineToggleBtn.setText(settings.offlineModeEnabled and "Use Without Internet (Auto-Correct): ON" or "Use Without Internet (Auto-Correct): OFF") 
       
-      -- آف لائن بٹن کا رنگ تبدیل کریں تاکہ واضح ہو
+      -- آف لائن بٹن کا رنگ
       if settings.offlineModeEnabled then
-          views.offlineToggleBtn.setBackgroundColor(0xFF4CAF50) -- Green
+          views.offlineToggleBtn.setBackgroundColor(0xFF4CAF50) -- Green (ON)
       else
-          views.offlineToggleBtn.setBackgroundColor(0xFFF44336) -- Red
+          views.offlineToggleBtn.setBackgroundColor(0xFFF44336) -- Red (OFF)
       end
   end
   
@@ -268,7 +224,7 @@ function showMainMenu()
       if settings.offlineModeEnabled then
           service.speak("Offline Auto Correct Enabled")
       else
-          service.speak("Offline Auto Correct Disabled. Normal typing active.")
+          service.speak("Offline Auto Correct Disabled")
       end
   end
   
@@ -282,7 +238,6 @@ end
 -- ============================================================
 ensureBackupFolder()
 loadAllSettings()
-loadOffline100kDictionary() -- 1 لاکھ کی لمٹ والی فائل میموری میں لوڈ ہو رہی ہے
 
 if service.getEditText() then
   if settings.showLangDialog then 
