@@ -68,6 +68,7 @@ function getGeminiModel()
 end
 
 function saveGeminiModel(model)
+    geminiEditor.putString("gemini_model", model) -- Fixed: Added missing save line
     geminiEditor.commit()
 end
 
@@ -230,10 +231,7 @@ function cleanAIResponse(text)
     text = text:gsub("^[%s]*Output:?%s*", "")
     text = text:gsub("^[%s]*Here is the corrected text:?%s*", "")
     text = text:gsub("%s*$", "")
-    if text:find("^[A-Z][a-z]+%s+") then
-        local firstSentence = text:match("^[^.]+[.]?")
-        if firstSentence then text = firstSentence end
-    end
+    -- Fixed: Removed the bug that was truncating text after the first sentence
     return text
 end
 
@@ -790,12 +788,9 @@ function applyDictionaryReplacements(text)
   local result = text
   for wrong, correct in pairs(changeTable) do
     if wrong and wrong ~= "" and correct and correct ~= "" then
-      local pattern = "%f[^%s%p]" .. escapePattern(wrong) .. "%f[%s%p\0]"
-      local ok, replaced = pcall(function() return result:gsub(pattern, correct) end)
-      if ok then result = replaced else
-        local patternSimple = escapePattern(wrong)
-        result = result:gsub(patternSimple, correct)
-      end
+      -- Fixed: Removed %f boundary that fails with UTF-8 Urdu characters
+      local pattern = escapePattern(wrong)
+      result = result:gsub(pattern, correct)
     end
   end
   return result
@@ -1068,6 +1063,27 @@ function showLanguagePicker(callback)
   dlg.show()
 end
 
+-- ============================================================
+-- Missing Backup Functions added here
+-- ============================================================
+function backupDictionary()
+  ensureBackupFolder()
+  if copyFile(dictFile, dictBackupFile) then
+    service.speak("Dictionary backed up successfully")
+  else
+    service.speak("Failed to backup dictionary")
+  end
+end
+
+function backupSettings()
+  ensureBackupFolder()
+  if copyFile(settingsFile, settingsBackupFile) then
+    service.speak("Settings backed up successfully")
+  else
+    service.speak("Failed to backup settings")
+  end
+end
+
 function showBackupRestoreDialog()
   local dlg = LuaDialog(service)
   dlg.setTitle("Backup / Restore")
@@ -1239,7 +1255,8 @@ function startVoiceTyping(langCode)
             ["ا رہی"] = "آ رہی", ["ا رہا"] = "آ رہا", ["ا رہے"] = "آ رہے", ["ا رھے"] = "آ رہے"
           }
           for wrong, correct in pairs(alifMaddaMap) do
-             finalText = finalText:gsub("%f[^%s%p]" .. escapePattern(wrong) .. "%f[%s%p\0]", correct)
+             -- Fixed: Removed %f boundary that fails with UTF-8 Urdu characters
+             finalText = finalText:gsub(escapePattern(wrong), correct)
           end
           
           finalText = applyDictionaryReplacements(finalText)
@@ -1262,10 +1279,11 @@ function startVoiceTyping(langCode)
                 ["انسو"] = "آنسو", ["اخری"] = "آخری", ["واز"] = "آواز", ["انکھیں"] = "آنکھیں",
                 ["اداب"] = "آداب", ["اسان"] = "آسان", ["ام"] = "آام", ["ایت"] = "آیت",
                 ["ارہی"] = "آرہی", ["ارہا"] = "آرہا", ["ارہے"] = "آرہے", ["ارہے"] = "آرہے", ["ارھے"] = "آرہے",
-                ["ا رہی"] = "آ رہی", ["ا رہا"] = "آ رہا", ["ا رہے"] = "آ رہے", ["ا rھے"] = "آ رہے"
+                ["ا رہی"] = "آ رہی", ["ا رہا"] = "آ رہا", ["ا رہے"] = "آ رہے", ["ا رھے"] = "آ رہے"
               }
               for wrong, correct in pairs(alifMaddaMap) do
-                 aiText = aiText:gsub("%f[^%s%p]" .. escapePattern(wrong) .. "%f[%s%p\0]", correct)
+                 -- Fixed: Removed %f boundary that fails with UTF-8 Urdu characters
+                 aiText = aiText:gsub(escapePattern(wrong), correct)
               end
               
               local finalText = applyDictionaryReplacements(aiText)
